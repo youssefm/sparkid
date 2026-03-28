@@ -234,6 +234,16 @@ def _order_names(all_names: set[str]) -> list[str]:
     return seen
 
 
+def _fmt_ids(v: float, _: object = None) -> str:
+    if v >= 1e9:
+        return f"{v / 1e9:.0f}B"
+    if v >= 1e6:
+        return f"{v / 1e6:.1f}M"
+    if v >= 1e3:
+        return f"{v / 1e3:.0f}K"
+    return str(int(v))
+
+
 def make_chart(
     js: dict[str, float],
     py: dict[str, float],
@@ -245,19 +255,17 @@ def make_chart(
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         import matplotlib.ticker as mticker
-        import numpy as np
     except ImportError as exc:  # pragma: no cover
-        sys.exit(f"Missing dependency: {exc}. Run: pip install matplotlib numpy")
+        sys.exit(f"Missing dependency: {exc}. Run: pip install matplotlib")
 
     all_names = set(js) | set(py) | set(rust)
-    names = _order_names(all_names)  # used only to assign stable colours
+    names = _order_names(all_names)  # stable ordering → stable colours
 
-    # Languages sorted fastest → slowest (determines group order top → bottom)
+    # Languages sorted fastest → slowest (Rust, JS, Python)
     langs_ordered = ["Rust", "JavaScript", "Python"]
     datasets_ordered = [rust, js, py]
 
-    # For each language, sort its generators fastest → slowest so the longest
-    # bar is at the top of each sub-group.
+    # Per-language generator lists sorted fastest → slowest
     per_lang: list[list[str]] = [
         sorted(data.keys(), key=lambda n: -data.get(n, 0.0))
         for data in datasets_ordered
@@ -275,32 +283,7 @@ def make_chart(
     ]
     gen_colors = {name: GEN_PALETTE[i % len(GEN_PALETTE)] for i, name in enumerate(names)}
 
-    # ── layout: one horizontal sub-group per language ─────────────────────────
-    BAR_H = 0.55      # height of each bar
-    GROUP_GAP = 1.0   # extra vertical space between language groups
-
-    # Build Y positions from top to bottom: Rust group, then JS, then Python.
-    # Within each group, generators are ordered fastest (top) to slowest (bottom).
-    y_ticks_lang: list[float] = []   # centre Y of each language label
-    bar_data: list[tuple[float, float, str, str, str]] = []  # (y, val, gen, lang, color)
-
-    y = 0.0
-    for li, (lang, data, gen_names) in enumerate(
-        zip(langs_ordered, datasets_ordered, per_lang)
-    ):
-        group_start = y
-        for gen in gen_names:
-            val = data.get(gen, 0.0)
-            bar_data.append((y, val, gen, lang, gen_colors.get(gen, "#94A3B8")))
-            y -= BAR_H
-        group_end = y + BAR_H  # last bar's top edge
-        y_ticks_lang.append((group_start + group_end) / 2)
-        if li < len(langs_ordered) - 1:
-            y -= GROUP_GAP   # gap between groups
-
-    all_y = [d[0] for d in bar_data]
-
-    # ── figure setup ─────────────────────────────────────────────────────────
+    # ── colours ───────────────────────────────────────────────────────────────
     FIG_BG = "#0d1117"
     AX_BG = "#161b22"
     GRID_COLOR = "#30363d"
@@ -308,105 +291,107 @@ def make_chart(
     TEXT_COLOR = "#e6edf3"
     MUTED = "#8b949e"
 
-    total_bars = len(bar_data)
-    fig_h = max(9, total_bars * 0.55 + len(langs_ordered) * 0.5 + 2.5)
-    fig, ax = plt.subplots(figsize=(16, fig_h))
-    fig.patch.set_facecolor(FIG_BG)
-    ax.set_facecolor(AX_BG)
+    BAR_H = 0.6   # bar height in data units
 
-    # ── draw horizontal bars ──────────────────────────────────────────────────
-    plotted_gens: set[str] = set()
-    for y_pos, val, gen, _lang, bar_c in bar_data:
-        lw = 1.2 if gen == "sparkid" else 0.6
-        alpha = 0.92 if gen == "sparkid" else 0.78
-        bar = ax.barh(
-            y_pos,
-            val,
-            BAR_H * 0.85,
-            color=bar_c,
-            edgecolor=bar_c,
-            linewidth=lw,
-            alpha=alpha,
-            zorder=3,
-            label=gen if gen not in plotted_gens else "_nolegend_",
-        )
-        plotted_gens.add(gen)
+    # Row heights proportional to number of generators in each language
+    row_counts = [len(g) for g in per_lang]
+    total_rows = sum(row_counts)
+    fig_h = max(10, total_rows * 0.72 + 3.0)
+    height_ratios = row_counts
 
-        if val > 0:
-            if val >= 1e9:
-                label = f"{val / 1e9:.1f}B"
-            elif val >= 1e6:
-                label = f"{val / 1e6:.1f}M"
-            elif val >= 1e3:
-                label = f"{val / 1e3:.0f}K"
-            else:
-                label = str(int(val))
-            ax.text(
-                val * 1.012,
-                y_pos,
-                label,
-                ha="left",
-                va="center",
-                fontsize=8,
-                fontweight="bold" if gen == "sparkid" else "normal",
-                color=bar_c,
-                zorder=5,
-            )
-
-    # ── axes & grid ───────────────────────────────────────────────────────────
-    ax.xaxis.set_major_formatter(
-        mticker.FuncFormatter(
-            lambda v, _: (
-                f"{v / 1e9:.0f}B"
-                if v >= 1e9
-                else f"{v / 1e6:.0f}M"
-                if v >= 1e6
-                else f"{v / 1e3:.0f}K"
-                if v >= 1e3
-                else str(int(v))
-            )
-        )
+    fig, axes = plt.subplots(
+        len(langs_ordered), 1,
+        figsize=(15, fig_h),
+        gridspec_kw={"height_ratios": height_ratios, "hspace": 0.55},
     )
+    fig.patch.set_facecolor(FIG_BG)
 
-    # Y-axis: language group labels at the vertical centre of each group
-    ax.set_yticks(y_ticks_lang)
-    ax.set_yticklabels(langs_ordered, fontsize=14, fontweight="bold", color=TEXT_COLOR)
-    ax.tick_params(axis="y", length=0, pad=10)
-    ax.tick_params(axis="x", colors=MUTED, labelsize=10)
-    ax.set_xlim(left=0)
-    ax.set_ylim(min(all_y) - BAR_H, max(all_y) + BAR_H)
+    legend_handles: list = []
+    legend_labels: list[str] = []
+    seen_legend: set[str] = set()
 
-    ax.set_xlabel("IDs / second  (higher is better →)", fontsize=12, color=MUTED, labelpad=12)
+    for ax, lang, data, gen_names in zip(axes, langs_ordered, datasets_ordered, per_lang):
+        ax.set_facecolor(AX_BG)
 
-    ax.grid(axis="x", color=GRID_COLOR, linewidth=0.7, zorder=0)
-    ax.set_axisbelow(True)
+        # Y positions: 0, -1, -2, … (fastest at top)
+        y_positions = list(range(len(gen_names) - 1, -1, -1))
 
-    # Draw a subtle horizontal separator between language groups
-    for i in range(len(langs_ordered) - 1):
-        mid = (y_ticks_lang[i] + y_ticks_lang[i + 1]) / 2
-        ax.axhline(mid, color=SPINE_COLOR, linewidth=1.0, zorder=1)
+        for idx, (gen, y_pos) in enumerate(zip(gen_names, y_positions)):
+            val = data.get(gen, 0.0)
+            bar_c = gen_colors.get(gen, "#94A3B8")
+            lw = 1.2 if gen == "sparkid" else 0.5
+            alpha = 0.92 if gen == "sparkid" else 0.80
 
-    for spine in ax.spines.values():
-        spine.set_edgecolor(SPINE_COLOR)
+            ax.barh(
+                y_pos, val, BAR_H,
+                color=bar_c, edgecolor=bar_c,
+                linewidth=lw, alpha=alpha, zorder=3,
+            )
 
-    # ── title ─────────────────────────────────────────────────────────────────
+            if val > 0:
+                ax.text(
+                    val * 1.015, y_pos, _fmt_ids(val),
+                    ha="left", va="center",
+                    fontsize=9,
+                    fontweight="bold" if gen == "sparkid" else "normal",
+                    color=bar_c, zorder=5,
+                )
+
+            if gen not in seen_legend:
+                import matplotlib.patches as mpatches
+                legend_handles.append(
+                    mpatches.Patch(facecolor=bar_c, edgecolor=bar_c, alpha=0.85, label=gen)
+                )
+                legend_labels.append(gen)
+                seen_legend.add(gen)
+
+        # Y-axis: generator names
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(gen_names, fontsize=10, color=TEXT_COLOR)
+        ax.tick_params(axis="y", length=0, pad=6)
+        ax.tick_params(axis="x", colors=MUTED, labelsize=9)
+
+        # X-axis: independent scale per subplot
+        ax.set_xlim(left=0)
+        max_val = max((data.get(g, 0.0) for g in gen_names), default=1.0)
+        ax.set_xlim(0, max_val * 1.18)  # leave room for value labels
+        ax.xaxis.set_major_formatter(mticker.FuncFormatter(_fmt_ids))
+
+        ax.grid(axis="x", color=GRID_COLOR, linewidth=0.7, zorder=0)
+        ax.set_axisbelow(True)
+
+        for spine in ax.spines.values():
+            spine.set_edgecolor(SPINE_COLOR)
+
+        # Language title above each subplot
+        ax.set_title(lang, fontsize=14, fontweight="bold", color=TEXT_COLOR,
+                     loc="left", pad=8)
+
+        # X-axis label only on the bottom subplot
+        if lang == langs_ordered[-1]:
+            ax.set_xlabel("IDs / second  (higher is better →)",
+                          fontsize=11, color=MUTED, labelpad=10)
+
+    # ── figure title ──────────────────────────────────────────────────────────
     fig.text(
-        0.5, 0.98,
+        0.5, 0.995,
         "SparkID — ID Generator Benchmark",
         ha="center", va="top",
         fontsize=20, fontweight="bold", color=TEXT_COLOR,
     )
     fig.text(
-        0.5, 0.945,
+        0.5, 0.963,
         "Median throughput per language  ·  sparkid vs. alternatives  |  Higher is better",
         ha="center", va="top",
         fontsize=11, color=MUTED,
     )
 
-    # ── legend ────────────────────────────────────────────────────────────────
-    ax.legend(
+    # ── shared legend ─────────────────────────────────────────────────────────
+    fig.legend(
+        legend_handles, legend_labels,
+        loc="upper right",
+        bbox_to_anchor=(0.99, 0.96),
         fontsize=11,
-        loc="lower right",
         framealpha=0.4,
         edgecolor=SPINE_COLOR,
         facecolor=AX_BG,
@@ -416,7 +401,6 @@ def make_chart(
         ncol=1,
     )
 
-    plt.tight_layout(rect=[0, 0.01, 1, 0.93])
     plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
     print(f"\n✅  Chart saved → {out}")
