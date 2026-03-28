@@ -250,14 +250,20 @@ def make_chart(
         sys.exit(f"Missing dependency: {exc}. Run: pip install matplotlib numpy")
 
     all_names = set(js) | set(py) | set(rust)
-    names = _order_names(all_names)  # generator names, sparkid first
-    n = len(names)
+    names = _order_names(all_names)  # used only to assign stable colours
 
-    langs = ["JavaScript", "Python", "Rust"]
-    datasets = [js, py, rust]
-    n_langs = len(langs)
+    # Languages sorted fastest → slowest (determines group order top → bottom)
+    langs_ordered = ["Rust", "JavaScript", "Python"]
+    datasets_ordered = [rust, js, py]
 
-    # One colour per generator - sparkid gets a distinct gold, others muted palette
+    # For each language, sort its generators fastest → slowest so the longest
+    # bar is at the top of each sub-group.
+    per_lang: list[list[str]] = [
+        sorted(data.keys(), key=lambda n: -data.get(n, 0.0))
+        for data in datasets_ordered
+    ]
+
+    # One stable colour per generator
     GEN_PALETTE = [
         "#F59E0B",  # sparkid - amber gold
         "#60A5FA",  # UUID v4 - blue
@@ -269,9 +275,30 @@ def make_chart(
     ]
     gen_colors = {name: GEN_PALETTE[i % len(GEN_PALETTE)] for i, name in enumerate(names)}
 
-    BAR_W = 0.14
-    LANG_SPACING = n * BAR_W + 0.35  # distance between language group centres
-    lang_xs = np.arange(n_langs) * LANG_SPACING
+    # ── layout: one horizontal sub-group per language ─────────────────────────
+    BAR_H = 0.55      # height of each bar
+    GROUP_GAP = 1.0   # extra vertical space between language groups
+
+    # Build Y positions from top to bottom: Rust group, then JS, then Python.
+    # Within each group, generators are ordered fastest (top) to slowest (bottom).
+    y_ticks_lang: list[float] = []   # centre Y of each language label
+    bar_data: list[tuple[float, float, str, str, str]] = []  # (y, val, gen, lang, color)
+
+    y = 0.0
+    for li, (lang, data, gen_names) in enumerate(
+        zip(langs_ordered, datasets_ordered, per_lang)
+    ):
+        group_start = y
+        for gen in gen_names:
+            val = data.get(gen, 0.0)
+            bar_data.append((y, val, gen, lang, gen_colors.get(gen, "#94A3B8")))
+            y -= BAR_H
+        group_end = y + BAR_H  # last bar's top edge
+        y_ticks_lang.append((group_start + group_end) / 2)
+        if li < len(langs_ordered) - 1:
+            y -= GROUP_GAP   # gap between groups
+
+    all_y = [d[0] for d in bar_data]
 
     # ── figure setup ─────────────────────────────────────────────────────────
     FIG_BG = "#0d1117"
@@ -281,35 +308,31 @@ def make_chart(
     TEXT_COLOR = "#e6edf3"
     MUTED = "#8b949e"
 
-    fig_w = max(18, n_langs * (n * BAR_W + 1.4))
-    fig, ax = plt.subplots(figsize=(fig_w, 9))
+    total_bars = len(bar_data)
+    fig_h = max(9, total_bars * 0.55 + len(langs_ordered) * 0.5 + 2.5)
+    fig, ax = plt.subplots(figsize=(16, fig_h))
     fig.patch.set_facecolor(FIG_BG)
     ax.set_facecolor(AX_BG)
 
-    # ── draw bars (grouped by language, coloured by generator) ───────────────
-    for gi, name in enumerate(names):
-        offset = (gi - (n - 1) / 2) * BAR_W
-        vals = np.array([datasets[li].get(name, 0.0) for li in range(n_langs)], dtype=float)
-        bar_c = gen_colors[name]
-        # sparkid bars get a brighter, slightly wider stroke
-        lw = 1.4 if name == "sparkid" else 0.7
-
-        bars = ax.bar(
-            lang_xs + offset,
-            vals,
-            BAR_W,
-            label=name,
+    # ── draw horizontal bars ──────────────────────────────────────────────────
+    plotted_gens: set[str] = set()
+    for y_pos, val, gen, _lang, bar_c in bar_data:
+        lw = 1.2 if gen == "sparkid" else 0.6
+        alpha = 0.92 if gen == "sparkid" else 0.78
+        bar = ax.barh(
+            y_pos,
+            val,
+            BAR_H * 0.85,
             color=bar_c,
             edgecolor=bar_c,
             linewidth=lw,
+            alpha=alpha,
             zorder=3,
-            alpha=0.90 if name == "sparkid" else 0.75,
+            label=gen if gen not in plotted_gens else "_nolegend_",
         )
+        plotted_gens.add(gen)
 
-        # Value labels above each bar
-        for bar, val in zip(bars, vals):
-            if val <= 0:
-                continue
+        if val > 0:
             if val >= 1e9:
                 label = f"{val / 1e9:.1f}B"
             elif val >= 1e6:
@@ -319,19 +342,19 @@ def make_chart(
             else:
                 label = str(int(val))
             ax.text(
-                bar.get_x() + bar.get_width() / 2,
-                bar.get_height() * 1.015,
+                val * 1.012,
+                y_pos,
                 label,
-                ha="center",
-                va="bottom",
-                fontsize=7,
-                fontweight="bold" if name == "sparkid" else "normal",
+                ha="left",
+                va="center",
+                fontsize=8,
+                fontweight="bold" if gen == "sparkid" else "normal",
                 color=bar_c,
                 zorder=5,
             )
 
     # ── axes & grid ───────────────────────────────────────────────────────────
-    ax.yaxis.set_major_formatter(
+    ax.xaxis.set_major_formatter(
         mticker.FuncFormatter(
             lambda v, _: (
                 f"{v / 1e9:.0f}B"
@@ -345,31 +368,36 @@ def make_chart(
         )
     )
 
-    ax.set_xticks(lang_xs)
-    ax.set_xticklabels(langs, fontsize=14, fontweight="bold", color=TEXT_COLOR)
-    ax.tick_params(axis="x", length=0, pad=10)
-    ax.tick_params(axis="y", colors=MUTED, labelsize=10)
-    ax.set_ylim(bottom=0)
+    # Y-axis: language group labels at the vertical centre of each group
+    ax.set_yticks(y_ticks_lang)
+    ax.set_yticklabels(langs_ordered, fontsize=14, fontweight="bold", color=TEXT_COLOR)
+    ax.tick_params(axis="y", length=0, pad=10)
+    ax.tick_params(axis="x", colors=MUTED, labelsize=10)
+    ax.set_xlim(left=0)
+    ax.set_ylim(min(all_y) - BAR_H, max(all_y) + BAR_H)
 
-    ax.set_ylabel("IDs / second  (higher is better ↑)", fontsize=12, color=MUTED, labelpad=12)
+    ax.set_xlabel("IDs / second  (higher is better →)", fontsize=12, color=MUTED, labelpad=12)
 
-    ax.grid(axis="y", color=GRID_COLOR, linewidth=0.7, zorder=0)
+    ax.grid(axis="x", color=GRID_COLOR, linewidth=0.7, zorder=0)
     ax.set_axisbelow(True)
-    half_group = (n - 1) / 2 * BAR_W
-    ax.set_xlim(lang_xs[0] - half_group - 0.3, lang_xs[-1] + half_group + 0.3)
+
+    # Draw a subtle horizontal separator between language groups
+    for i in range(len(langs_ordered) - 1):
+        mid = (y_ticks_lang[i] + y_ticks_lang[i + 1]) / 2
+        ax.axhline(mid, color=SPINE_COLOR, linewidth=1.0, zorder=1)
 
     for spine in ax.spines.values():
         spine.set_edgecolor(SPINE_COLOR)
 
     # ── title ─────────────────────────────────────────────────────────────────
     fig.text(
-        0.5, 0.97,
+        0.5, 0.98,
         "SparkID — ID Generator Benchmark",
         ha="center", va="top",
         fontsize=20, fontweight="bold", color=TEXT_COLOR,
     )
     fig.text(
-        0.5, 0.925,
+        0.5, 0.945,
         "Median throughput per language  ·  sparkid vs. alternatives  |  Higher is better",
         ha="center", va="top",
         fontsize=11, color=MUTED,
@@ -378,7 +406,7 @@ def make_chart(
     # ── legend ────────────────────────────────────────────────────────────────
     ax.legend(
         fontsize=11,
-        loc="upper right",
+        loc="lower right",
         framealpha=0.4,
         edgecolor=SPINE_COLOR,
         facecolor=AX_BG,
@@ -388,7 +416,7 @@ def make_chart(
         ncol=1,
     )
 
-    plt.tight_layout(rect=[0, 0.01, 1, 0.92])
+    plt.tight_layout(rect=[0, 0.01, 1, 0.93])
     plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
     print(f"\n✅  Chart saved → {out}")
