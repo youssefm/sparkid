@@ -9,7 +9,9 @@ Usage:
 """
 
 import argparse
+import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +22,28 @@ PYTHON_DIR = REPO_ROOT / "python"
 RUST_DIR = REPO_ROOT / "rust"
 
 DEFAULT_OUT = str(REPO_ROOT / "benchmark_comparison.png")
+
+_MAX_ERROR_OUTPUT_CHARS = 400
+
+# Extra directories to include when searching for tools (e.g. npm, uv)
+_EXTRA_PATH_DIRS = [
+    "/home/runner/.local/bin",
+    "/home/runner/.cargo/bin",
+    "/usr/local/bin",
+    os.path.expanduser("~/.local/bin"),
+]
+
+
+def _which(cmd: str) -> str:
+    """Locate *cmd* on PATH (plus common extra dirs), raising if not found."""
+    extra = os.pathsep.join(d for d in _EXTRA_PATH_DIRS if d not in os.environ.get("PATH", ""))
+    augmented_path = os.environ.get("PATH", "") + (os.pathsep + extra if extra else "")
+    found = shutil.which(cmd, path=augmented_path)
+    if not found:
+        raise FileNotFoundError(
+            f"'{cmd}' not found. Make sure it is installed and on your PATH."
+        )
+    return found
 
 # ── name normalisation ────────────────────────────────────────────────────────
 
@@ -46,8 +70,17 @@ def _norm(name: str) -> str:
 
 def run_js() -> str:
     print("▶  Running JS comparison benchmark …", flush=True)
+    try:
+        npm = _which("npm")
+    except FileNotFoundError as exc:
+        print(f"   ⚠ {exc}", file=sys.stderr)
+        return ""
+    # Ensure dev dependencies (tsx, uuid, nanoid, ulid) are installed
+    if not (JS_DIR / "node_modules" / ".bin" / "tsx").exists():
+        print("   installing JS dependencies …", flush=True)
+        subprocess.run([npm, "install"], cwd=JS_DIR, check=True, capture_output=True)
     result = subprocess.run(
-        ["npm", "run", "bench:compare"],
+        [npm, "run", "bench:compare"],
         cwd=JS_DIR,
         capture_output=True,
         text=True,
@@ -55,13 +88,27 @@ def run_js() -> str:
     output = result.stdout + result.stderr
     if result.returncode != 0:
         print(f"   ⚠ JS benchmark exited with code {result.returncode}", file=sys.stderr)
+        print(result.stderr[:_MAX_ERROR_OUTPUT_CHARS], file=sys.stderr)
     return output
 
 
 def run_python() -> str:
     print("▶  Running Python comparison benchmark …", flush=True)
+    try:
+        uv = _which("uv")
+    except FileNotFoundError as exc:
+        print(f"   ⚠ {exc}", file=sys.stderr)
+        return ""
+    # Ensure all benchmark dependencies are installed in the uv environment
+    sync = subprocess.run(
+        [uv, "sync", "--all-groups"],
+        cwd=PYTHON_DIR,
+        capture_output=True,
+    )
+    if sync.returncode != 0:
+        print("   ⚠ uv sync failed; benchmark may be missing optional dependencies", file=sys.stderr)
     result = subprocess.run(
-        ["uv", "run", "python", "bench/benchmark.py", "--compare"],
+        [uv, "run", "python", "bench/benchmark.py", "--compare"],
         cwd=PYTHON_DIR,
         capture_output=True,
         text=True,
@@ -69,13 +116,19 @@ def run_python() -> str:
     output = result.stdout + result.stderr
     if result.returncode != 0:
         print(f"   ⚠ Python benchmark exited with code {result.returncode}", file=sys.stderr)
+        print(result.stderr[:_MAX_ERROR_OUTPUT_CHARS], file=sys.stderr)
     return output
 
 
 def run_rust() -> str:
     print("▶  Running Rust comparison benchmark …", flush=True)
+    try:
+        cargo = _which("cargo")
+    except FileNotFoundError as exc:
+        print(f"   ⚠ {exc}", file=sys.stderr)
+        return ""
     result = subprocess.run(
-        ["cargo", "bench", "--bench", "benchmark"],
+        [cargo, "bench", "--bench", "benchmark"],
         cwd=RUST_DIR,
         capture_output=True,
         text=True,
@@ -197,19 +250,28 @@ def make_chart(
         sys.exit(f"Missing dependency: {exc}. Run: pip install matplotlib numpy")
 
     all_names = set(js) | set(py) | set(rust)
-    names = _order_names(all_names)
+    names = _order_names(all_names)  # generator names, sparkid first
     n = len(names)
 
     langs = ["JavaScript", "Python", "Rust"]
     datasets = [js, py, rust]
+    n_langs = len(langs)
 
-    # Colour palette — JS yellow, Python blue, Rust orange-red
-    BAR_COLORS = ["#F7DF1E", "#3B82F6", "#EF4444"]
-    EDGE_COLORS = ["#a89200", "#1d4ed8", "#b91c1c"]
+    # One colour per generator - sparkid gets a distinct gold, others muted palette
+    GEN_PALETTE = [
+        "#F59E0B",  # sparkid - amber gold
+        "#60A5FA",  # UUID v4 - blue
+        "#34D399",  # UUID v7 - emerald
+        "#F472B6",  # nanoid  - pink
+        "#A78BFA",  # ulid    - violet
+        "#FB923C",  # cuid2   - orange
+        "#94A3B8",  # extra   - slate
+    ]
+    gen_colors = {name: GEN_PALETTE[i % len(GEN_PALETTE)] for i, name in enumerate(names)}
 
-    BAR_W = 0.24
-    GROUP_GAP = 0.12  # extra gap between groups
-    xs = np.arange(n) * (len(langs) * BAR_W + GROUP_GAP + 0.1)
+    BAR_W = 0.14
+    LANG_SPACING = n * BAR_W + 0.35  # distance between language group centres
+    lang_xs = np.arange(n_langs) * LANG_SPACING
 
     # ── figure setup ─────────────────────────────────────────────────────────
     FIG_BG = "#0d1117"
@@ -219,27 +281,29 @@ def make_chart(
     TEXT_COLOR = "#e6edf3"
     MUTED = "#8b949e"
 
-    fig, ax = plt.subplots(figsize=(max(16, n * 3.2), 9))
+    fig_w = max(18, n_langs * (n * BAR_W + 1.4))
+    fig, ax = plt.subplots(figsize=(fig_w, 9))
     fig.patch.set_facecolor(FIG_BG)
     ax.set_facecolor(AX_BG)
 
-    # ── draw bars ─────────────────────────────────────────────────────────────
-    for li, (lang, data, bar_c, edge_c) in enumerate(
-        zip(langs, datasets, BAR_COLORS, EDGE_COLORS)
-    ):
-        offset = (li - (len(langs) - 1) / 2) * BAR_W
-        vals = np.array([data.get(name, 0.0) for name in names], dtype=float)
+    # ── draw bars (grouped by language, coloured by generator) ───────────────
+    for gi, name in enumerate(names):
+        offset = (gi - (n - 1) / 2) * BAR_W
+        vals = np.array([datasets[li].get(name, 0.0) for li in range(n_langs)], dtype=float)
+        bar_c = gen_colors[name]
+        # sparkid bars get a brighter, slightly wider stroke
+        lw = 1.4 if name == "sparkid" else 0.7
 
         bars = ax.bar(
-            xs + offset,
+            lang_xs + offset,
             vals,
             BAR_W,
-            label=lang,
+            label=name,
             color=bar_c,
-            edgecolor=edge_c,
-            linewidth=0.9,
+            edgecolor=bar_c,
+            linewidth=lw,
             zorder=3,
-            alpha=0.92,
+            alpha=0.90 if name == "sparkid" else 0.75,
         )
 
         # Value labels above each bar
@@ -256,25 +320,17 @@ def make_chart(
                 label = str(int(val))
             ax.text(
                 bar.get_x() + bar.get_width() / 2,
-                bar.get_height() * 1.04,
+                bar.get_height() * 1.015,
                 label,
                 ha="center",
                 va="bottom",
-                fontsize=7.5,
-                fontweight="bold",
+                fontsize=7,
+                fontweight="bold" if name == "sparkid" else "normal",
                 color=bar_c,
                 zorder=5,
             )
 
-    # ── highlight sparkid group ───────────────────────────────────────────────
-    if "sparkid" in names:
-        si = names.index("sparkid")
-        span_x = xs[si] - BAR_W * len(langs) / 2 - 0.04
-        span_w = BAR_W * len(langs) + 0.08
-        ax.axvspan(span_x, span_x + span_w, color="#ffffff", alpha=0.04, zorder=1)
-
     # ── axes & grid ───────────────────────────────────────────────────────────
-    ax.set_yscale("log")
     ax.yaxis.set_major_formatter(
         mticker.FuncFormatter(
             lambda v, _: (
@@ -288,19 +344,19 @@ def make_chart(
             )
         )
     )
-    ax.yaxis.set_minor_formatter(mticker.NullFormatter())
 
-    ax.set_xticks(xs)
-    ax.set_xticklabels(names, fontsize=13, fontweight="bold", color=TEXT_COLOR)
-    ax.tick_params(axis="x", length=0, pad=8)
+    ax.set_xticks(lang_xs)
+    ax.set_xticklabels(langs, fontsize=14, fontweight="bold", color=TEXT_COLOR)
+    ax.tick_params(axis="x", length=0, pad=10)
     ax.tick_params(axis="y", colors=MUTED, labelsize=10)
+    ax.set_ylim(bottom=0)
 
-    ax.set_ylabel("Throughput  (IDs / second, log scale)", fontsize=12, color=MUTED, labelpad=12)
+    ax.set_ylabel("IDs / second  (higher is better ↑)", fontsize=12, color=MUTED, labelpad=12)
 
-    ax.grid(axis="y", which="major", color=GRID_COLOR, linewidth=0.7, zorder=0)
-    ax.grid(axis="y", which="minor", color=GRID_COLOR, linewidth=0.3, linestyle=":", zorder=0)
+    ax.grid(axis="y", color=GRID_COLOR, linewidth=0.7, zorder=0)
     ax.set_axisbelow(True)
-    ax.set_xlim(xs[0] - BAR_W * 2, xs[-1] + BAR_W * 2)
+    half_group = (n - 1) / 2 * BAR_W
+    ax.set_xlim(lang_xs[0] - half_group - 0.3, lang_xs[-1] + half_group + 0.3)
 
     for spine in ax.spines.values():
         spine.set_edgecolor(SPINE_COLOR)
@@ -314,33 +370,25 @@ def make_chart(
     )
     fig.text(
         0.5, 0.925,
-        "Median throughput across JavaScript · Python · Rust  |  Higher is better",
+        "Median throughput per language  ·  sparkid vs. alternatives  |  Higher is better",
         ha="center", va="top",
         fontsize=11, color=MUTED,
     )
 
     # ── legend ────────────────────────────────────────────────────────────────
-    legend = ax.legend(
-        fontsize=12,
-        loc="lower right",
+    ax.legend(
+        fontsize=11,
+        loc="upper right",
         framealpha=0.4,
         edgecolor=SPINE_COLOR,
         facecolor=AX_BG,
         labelcolor=TEXT_COLOR,
         handlelength=1.4,
         handleheight=1.2,
+        ncol=1,
     )
 
-    # ── footnote ──────────────────────────────────────────────────────────────
-    fig.text(
-        0.5, 0.01,
-        "sparkid group highlighted  ·  log scale reveals cross-language relative performance",
-        ha="center",
-        fontsize=9,
-        color=MUTED,
-    )
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.92])
+    plt.tight_layout(rect=[0, 0.01, 1, 0.92])
     plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
     print(f"\n✅  Chart saved → {out}")
