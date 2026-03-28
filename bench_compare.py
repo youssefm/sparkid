@@ -244,6 +244,35 @@ def _fmt_ids(v: float, _: object = None) -> str:
     return str(int(v))
 
 
+def _hw_info() -> str:
+    """Return a short hardware summary string for the chart footer."""
+    import platform
+    import multiprocessing
+
+    cpu = platform.processor() or platform.machine() or "unknown CPU"
+    cores = multiprocessing.cpu_count()
+    os_name = f"{platform.system()} {platform.release()}"
+
+    # Try to get physical RAM via /proc/meminfo (Linux) or sysctl (macOS)
+    ram = ""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    ram = f"  ·  {kb // (1024 ** 2)} GB RAM"
+                    break
+    except Exception:
+        try:
+            import subprocess
+            out = subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True).strip()
+            ram = f"  ·  {int(out) // (1024 ** 3)} GB RAM"
+        except Exception:
+            pass
+
+    return f"CPU: {cpu} ({cores} cores){ram}  ·  OS: {os_name}"
+
+
 def make_chart(
     js: dict[str, float],
     py: dict[str, float],
@@ -261,9 +290,9 @@ def make_chart(
     all_names = set(js) | set(py) | set(rust)
     names = _order_names(all_names)  # stable ordering → stable colours
 
-    # Languages sorted fastest → slowest (Rust, JS, Python)
-    langs_ordered = ["Rust", "JavaScript", "Python"]
-    datasets_ordered = [rust, js, py]
+    # Languages ordered slowest → fastest (Python at top, Rust at bottom)
+    langs_ordered = ["Python", "JavaScript", "Rust"]
+    datasets_ordered = [py, js, rust]
 
     # Per-language generator lists sorted fastest → slowest
     per_lang: list[list[str]] = [
@@ -296,7 +325,7 @@ def make_chart(
     # Row heights proportional to number of generators in each language
     row_counts = [len(g) for g in per_lang]
     total_rows = sum(row_counts)
-    fig_h = max(10, total_rows * 0.72 + 3.0)
+    fig_h = max(10, total_rows * 0.72 + 3.5)
     height_ratios = row_counts
 
     fig, axes = plt.subplots(
@@ -306,17 +335,13 @@ def make_chart(
     )
     fig.patch.set_facecolor(FIG_BG)
 
-    legend_handles: list = []
-    legend_labels: list[str] = []
-    seen_legend: set[str] = set()
-
     for ax, lang, data, gen_names in zip(axes, langs_ordered, datasets_ordered, per_lang):
         ax.set_facecolor(AX_BG)
 
         # Y positions: 0, -1, -2, … (fastest at top)
         y_positions = list(range(len(gen_names) - 1, -1, -1))
 
-        for idx, (gen, y_pos) in enumerate(zip(gen_names, y_positions)):
+        for gen, y_pos in zip(gen_names, y_positions):
             val = data.get(gen, 0.0)
             bar_c = gen_colors.get(gen, "#94A3B8")
             lw = 1.2 if gen == "sparkid" else 0.5
@@ -337,22 +362,13 @@ def make_chart(
                     color=bar_c, zorder=5,
                 )
 
-            if gen not in seen_legend:
-                import matplotlib.patches as mpatches
-                legend_handles.append(
-                    mpatches.Patch(facecolor=bar_c, edgecolor=bar_c, alpha=0.85, label=gen)
-                )
-                legend_labels.append(gen)
-                seen_legend.add(gen)
-
-        # Y-axis: generator names
+        # Y-axis: generator names (no legend needed — names are on the axis)
         ax.set_yticks(y_positions)
         ax.set_yticklabels(gen_names, fontsize=10, color=TEXT_COLOR)
         ax.tick_params(axis="y", length=0, pad=6)
         ax.tick_params(axis="x", colors=MUTED, labelsize=9)
 
         # X-axis: independent scale per subplot
-        ax.set_xlim(left=0)
         max_val = max((data.get(g, 0.0) for g in gen_names), default=1.0)
         ax.set_xlim(0, max_val * 1.18)  # leave room for value labels
         ax.xaxis.set_major_formatter(mticker.FuncFormatter(_fmt_ids))
@@ -369,7 +385,7 @@ def make_chart(
 
         # X-axis label only on the bottom subplot
         if lang == langs_ordered[-1]:
-            ax.set_xlabel("IDs / second  (higher is better →)",
+            ax.set_xlabel("Median IDs / second  (higher is better →)",
                           fontsize=11, color=MUTED, labelpad=10)
 
     # ── figure title ──────────────────────────────────────────────────────────
@@ -386,19 +402,12 @@ def make_chart(
         fontsize=11, color=MUTED,
     )
 
-    # ── shared legend ─────────────────────────────────────────────────────────
-    fig.legend(
-        legend_handles, legend_labels,
-        loc="upper right",
-        bbox_to_anchor=(0.99, 0.96),
-        fontsize=11,
-        framealpha=0.4,
-        edgecolor=SPINE_COLOR,
-        facecolor=AX_BG,
-        labelcolor=TEXT_COLOR,
-        handlelength=1.4,
-        handleheight=1.2,
-        ncol=1,
+    # ── hardware footer ───────────────────────────────────────────────────────
+    fig.text(
+        0.5, 0.003,
+        _hw_info(),
+        ha="center", va="bottom",
+        fontsize=8, color=MUTED,
     )
 
     plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
