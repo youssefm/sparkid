@@ -1,0 +1,54 @@
+{
+  "name": "sparkid",
+  "version": "1.1.3",
+  "description": "Fast, time-sortable, 22-char Base58 unique ID generator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "tsx --test tests/test_sparkid.ts",
+    "bench": "tsx bench/benchmark.ts",
+    "bench:compare": "tsx bench/benchmark.ts --compare"
+  },
+  "keywords": [
+    "id",
+    "uuid",
+    "unique",
+    "sortable",
+    "base58",
+    "ulid",
+    "ksuid"
+  ],
+  "sideEffects": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/youssefm/sparkid.git",
+    "directory": "js"
+  },
+  "homepage": "https://github.com/youssefm/sparkid#javascript",
+  "bugs": "https://github.com/youssefm/sparkid/issues",
+  "license": "MIT",
+  "engines": {
+    "node": ">=19"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "nanoid": "^5.1.7",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "ulid": "^3.0.2",
+    "uuid": "^13.0.0"
+  }
+}

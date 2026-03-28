@@ -1,0 +1,128 @@
+use criterion::{criterion_group, criterion_main, Criterion};
+use sparkid::{IdGenerator, SparkId};
+use std::collections::HashSet;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE: usize = 58;
+
+fn current_time_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
+}
+
+fn decode_timestamp(encoded: &str) -> u64 {
+    let mut val: u64 = 0;
+    for ch in encoded.bytes() {
+        let idx = ALPHABET.bytes().position(|b| b == ch).unwrap();
+        val = val * BASE as u64 + idx as u64;
+    }
+    val
+}
+
+/// Run correctness checks before benchmarking.
+fn verify() {
+    let valid_chars: HashSet<char> = ALPHABET.chars().collect();
+    let mut gen = IdGenerator::new();
+
+    // 50,000 IDs: valid length, charset, uniqueness
+    let mut ids: Vec<SparkId> = Vec::with_capacity(50_000);
+    for _ in 0..50_000 {
+        let id = gen.next_id();
+        assert_eq!(id.len(), 22, "wrong length");
+        for ch in id.chars() {
+            assert!(valid_chars.contains(&ch), "invalid char: {ch}");
+        }
+        ids.push(id);
+    }
+    let unique: HashSet<SparkId> = ids.iter().copied().collect();
+    assert_eq!(unique.len(), ids.len(), "duplicates found");
+
+    // Monotonicity: 10,000 burst IDs
+    let mut gen2 = IdGenerator::new();
+    let burst: Vec<SparkId> = (0..10_000).map(|_| gen2.next_id()).collect();
+    for i in 1..burst.len() {
+        assert!(burst[i] > burst[i - 1], "not monotonic at {i}");
+    }
+
+    // Sortability: batches across milliseconds
+    let mut gen3 = IdGenerator::new();
+    let batch_a: Vec<SparkId> = (0..50).map(|_| gen3.next_id()).collect();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let batch_b: Vec<SparkId> = (0..50).map(|_| gen3.next_id()).collect();
+    let max_a = batch_a.iter().max().unwrap();
+    let min_b = batch_b.iter().min().unwrap();
+    assert!(max_a < min_b, "batches not sorted across ms");
+
+    // Timestamp accuracy
+    let before = current_time_ms();
+    let id = gen3.next_id();
+    let after = current_time_ms();
+    let decoded = decode_timestamp(&id[..8]);
+    assert!(
+        before <= decoded && decoded <= after,
+        "timestamp out of range"
+    );
+
+    println!("Correctness verification passed.");
+}
+
+fn bench_generator(c: &mut Criterion) {
+    verify();
+
+    let mut gen = IdGenerator::new();
+    for _ in 0..10_000 {
+        let _ = gen.next_id();
+    }
+
+    c.bench_function("sparkid::IdGenerator::next_id", |b| {
+        b.iter(|| gen.next_id())
+    });
+}
+
+fn bench_thread_local(c: &mut Criterion) {
+    for _ in 0..10_000 {
+        let _ = SparkId::new();
+    }
+    c.bench_function("sparkid::SparkId::new", |b| b.iter(SparkId::new));
+}
+
+fn bench_comparison(c: &mut Criterion) {
+    let mut group = c.benchmark_group("id_generators");
+
+    // sparkid — zero-alloc (returns Copy type, like Uuid/Ulid)
+    let mut sparkid_gen = IdGenerator::new();
+    group.bench_function("sparkid", |b| b.iter(|| sparkid_gen.next_id()));
+
+    // uuid — returns Copy type Uuid, then .to_string() for fair comparison
+    group.bench_function("uuid_v4", |b| {
+        b.iter(|| uuid::Uuid::new_v4().to_string())
+    });
+
+    group.bench_function("uuid_v7", |b| {
+        b.iter(|| uuid::Uuid::now_v7().to_string())
+    });
+
+    group.bench_function("nanoid", |b| b.iter(|| nanoid::nanoid!()));
+
+    // ulid — returns Copy type Ulid, then .to_string() for fair comparison
+    group.bench_function("ulid", |b| {
+        b.iter(|| ulid::Ulid::new().to_string())
+    });
+
+    group.finish();
+
+    // Print sample IDs
+    let mut gen = IdGenerator::new();
+    println!("\nSample IDs:");
+    println!("  sparkid: {}", gen.next_id());
+    println!("  uuid_v4: {}", uuid::Uuid::new_v4());
+    println!("  uuid_v7: {}", uuid::Uuid::now_v7());
+    println!("  nanoid:  {}", nanoid::nanoid!());
+    println!("  ulid:    {}", ulid::Ulid::new());
+}
+
+criterion_group!(benches, bench_generator, bench_thread_local, bench_comparison);
+criterion_main!(benches);

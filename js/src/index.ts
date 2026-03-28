@@ -1,0 +1,193 @@
+// Base58 alphabet — excludes visually ambiguous characters (0, O, I, l)
+const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const BASE = ALPHABET.length; // 58
+
+// ID structure: [8-char timestamp][6-char counter][8-char random] = 22 chars
+const COUNTER_CHAR_COUNT = 6;
+const RANDOM_CHAR_COUNT = 8;
+
+// How many random bytes to fetch per batch. After rejection sampling,
+// ~90.6% survive (58/64), yielding ~14848 valid chars (~1856 IDs).
+const RANDOM_BATCH_SIZE = 16384;
+
+// Timestamp encoding: remainder (0-57) -> single char
+const TIMESTAMP_LOOKUP: string[] = Array.from({ length: BASE }, (_, i) => ALPHABET[i]);
+
+// Random encoding: for each byte 0-255, mask to 6 bits (0-63).
+// Values < 58 map to their alphabet char code; values >= 58 are rejected (0).
+// No modulo bias.
+const RANDOM_CHARCODE_LOOKUP: Uint8Array = new Uint8Array(256);
+for (let byte = 0; byte < 256; byte++) {
+  const value = byte & 0x3f;
+  RANDOM_CHARCODE_LOOKUP[byte] = value < BASE ? ALPHABET.charCodeAt(value) : 0;
+}
+
+// Successor table: charCode -> next Base58 char code, or 0 if carry needed.
+// Using char codes avoids string allocation on the hot path.
+const SUCCESSOR_CC: Uint8Array = new Uint8Array(123); // charCode('z') + 1
+for (let i = 0; i < BASE - 1; i++) {
+  SUCCESSOR_CC[ALPHABET.charCodeAt(i)] = ALPHABET.charCodeAt(i + 1);
+}
+// Last char ('z') stays 0 (carry)
+
+// Successor table (string version) for carry propagation
+const SUCCESSOR: string[] = new Array(123).fill("");
+for (let i = 0; i < BASE - 1; i++) {
+  SUCCESSOR[ALPHABET.charCodeAt(i)] = ALPHABET[i + 1];
+}
+
+const FIRST_CHAR = ALPHABET[0];
+const FIRST_CHAR_CODE = ALPHABET.charCodeAt(0);
+
+// Pre-allocated buffers for getRandomValues and rejection-sampled char codes.
+// Allocated lazily on first use (in refillRandom) to avoid 32KB upfront cost
+// at import time. Held in a const object so inner functions can pull fast
+// const-local aliases (V8 optimizes const typed-array refs better than let).
+const randomBuffers: { raw: Uint8Array; charCodes: Uint8Array } = {} as any;
+
+// Timestamp cache — only re-encoded when the millisecond advances
+let timestampCacheMs = 0;
+let timestampCachePrefix = "";
+let randomCharCount = 0;
+let randomCharPosition = 0;
+
+// The counter is split into a stable head (5 chars) and a frequently-changing
+// tail (1 char code). On the hot path (same millisecond, no carry), only the
+// tail char code is bumped via a single successor lookup — no string ops needed.
+// The prefix (8 chars) and counter head (5 chars) are pre-concatenated into a
+// single 13-char string so the final return is a 2-part concat:
+//   prefixPlusCounterHead + String.fromCharCode(counterTailCharCode, ...8 random chars)
+let prefixPlusCounterHead = "";
+let counterTailCharCode = FIRST_CHAR_CODE;
+
+function encodeTimestamp(timestamp: number): void {
+  timestampCacheMs = timestamp;
+  let remainder: number;
+  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char7 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char6 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char5 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char4 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char3 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char2 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char1 = TIMESTAMP_LOOKUP[remainder];
+  timestampCachePrefix = TIMESTAMP_LOOKUP[timestamp] + char1 + char2 + char3 + char4 + char5 + char6 + char7;
+}
+
+function refillRandom(): void {
+  if (randomBuffers.raw === undefined) {
+    randomBuffers.raw = new Uint8Array(RANDOM_BATCH_SIZE);
+    randomBuffers.charCodes = new Uint8Array(RANDOM_BATCH_SIZE);
+  }
+  const raw = randomBuffers.raw;
+  crypto.getRandomValues(raw);
+  const lookup = RANDOM_CHARCODE_LOOKUP;
+  const buf = randomBuffers.charCodes;
+  let count = 0;
+  for (let i = 0; i < RANDOM_BATCH_SIZE; i++) {
+    const cc = lookup[raw[i]];
+    if (cc !== 0) {
+      buf[count++] = cc;
+    }
+  }
+  randomCharCount = count;
+  randomCharPosition = 0;
+}
+
+function seedCounter(): void {
+  while (randomCharPosition + COUNTER_CHAR_COUNT > randomCharCount) {
+    refillRandom();
+  }
+  const pos = randomCharPosition;
+  randomCharPosition = pos + COUNTER_CHAR_COUNT;
+  const buf = randomBuffers.charCodes;
+  prefixPlusCounterHead = timestampCachePrefix + String.fromCharCode(
+    buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3], buf[pos + 4]
+  );
+  counterTailCharCode = buf[pos + 5];
+}
+
+/**
+ * Handle carry propagation through the counter head portion.
+ *
+ * Called when the counter tail char overflows. Walks backward through
+ * the counter head chars (positions 4 down to 0, stored at indices 12
+ * down to 8 in prefixPlusCounterHead). On full overflow (all 6 counter
+ * chars at max — practically impossible at ~38 billion increments per
+ * ms), bumps the timestamp forward by 1ms and reseeds.
+ */
+function incrementCarry(): void {
+  const pph = prefixPlusCounterHead;
+  for (let i = 12; i >= 8; i--) {
+    const next = SUCCESSOR[pph.charCodeAt(i)];
+    if (next) {
+      prefixPlusCounterHead = pph.substring(0, i) + next + FIRST_CHAR.repeat(12 - i);
+      counterTailCharCode = FIRST_CHAR_CODE;
+      return;
+    }
+  }
+  // Full overflow: bump timestamp, reseed.
+  timestampCacheMs += 1;
+  encodeTimestamp(timestampCacheMs);
+  seedCounter();
+}
+
+/**
+ * Generate a unique, time-sortable, 22-char Base58 ID.
+ *
+ * Each ID is composed of three parts:
+ *   - 8-char timestamp prefix   (milliseconds, Base58-encoded, sortable)
+ *   - 6-char monotonic counter  (randomly seeded each ms, incremented)
+ *   - 8-char random tail        (independently random per ID)
+ *
+ * IDs are strictly monotonically increasing within a single process:
+ * across milliseconds by the timestamp prefix, and within the same millisecond
+ * by incrementing the counter (seeded from crypto.getRandomValues at the
+ * start of each new millisecond). Since JavaScript is single-threaded, this
+ * gives process-wide monotonicity with no additional coordination needed.
+ *
+ * The random tail is freshly generated for every ID, making individual IDs
+ * unpredictable even when the counter value can be inferred.
+ *
+ * Properties:
+ *   - 22 characters, fixed length
+ *   - Lexicographically sortable by creation time
+ *   - Monotonically increasing (within a single process)
+ *   - URL-safe, no ambiguous characters
+ *   - ~58^14 (~1.8 x 10^24) total combinations per millisecond
+ *   - Cryptographically secure randomness (crypto.getRandomValues)
+ *
+ * Works in Node.js (>=19), browsers, Deno, Bun, and Cloudflare Workers.
+ */
+export function generateId(): string {
+  const timestamp = Date.now();
+
+  if (timestamp > timestampCacheMs) {
+    // New millisecond (or first call): encode timestamp, seed counter.
+    encodeTimestamp(timestamp);
+    seedCounter();
+  } else {
+    // Same millisecond (or clock went backward): increment counter tail.
+    const nxt = SUCCESSOR_CC[counterTailCharCode];
+    if (nxt) {
+      counterTailCharCode = nxt;
+    } else {
+      incrementCarry();
+    }
+  }
+
+  // Ensure random buffer has enough chars for the tail.
+  while (randomCharPosition + RANDOM_CHAR_COUNT > randomCharCount) {
+    refillRandom();
+  }
+  const pos = randomCharPosition;
+  randomCharPosition = pos + RANDOM_CHAR_COUNT;
+
+  // Build the 22-char ID as a 2-part concat: cached 13-char prefix + 9-char suffix.
+  // The suffix is built via String.fromCharCode to produce a flat string directly.
+  const buf = randomBuffers.charCodes;
+  return prefixPlusCounterHead + String.fromCharCode(
+    counterTailCharCode,
+    buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3],
+    buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]
+  );
+}

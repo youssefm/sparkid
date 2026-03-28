@@ -1,0 +1,78 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [19, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+        working-directory: js
+      - run: npx tsc --noEmit
+        working-directory: js
+      - run: npm test
+        working-directory: js
+      - run: npm run build
+        working-directory: js
+
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --group test
+        working-directory: python
+      - run: uvx ruff check src/ tests/
+        working-directory: python
+      - run: uvx mypy src/
+        working-directory: python
+        if: matrix.python-version == '3.13'
+      - run: uv run pytest tests/
+        working-directory: python
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo test
+        working-directory: rust
+      - run: cargo build -p no_std_check
+        working-directory: rust
+      - run: cargo clippy -- -D warnings
+        working-directory: rust
+
+  rust-msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.75
+      # Regenerate lockfile picking MSRV-compatible dependency versions
+      - run: rm Cargo.lock && cargo +stable generate-lockfile
+        working-directory: rust
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+      - run: cargo +1.75 test
+        working-directory: rust
+      - run: cargo +1.75 build -p no_std_check
+        working-directory: rust
