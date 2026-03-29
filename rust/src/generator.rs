@@ -380,10 +380,10 @@ impl IdGenerator {
         if let Some(f) = self.time_function {
             return f();
         }
-        let duration = SystemTime::now()
+        SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("system clock before Unix epoch");
-        duration.as_secs() * 1000 + duration.subsec_millis() as u64
+            .expect("system clock before Unix epoch")
+            .as_millis() as u64
     }
 
     fn encode_timestamp(&mut self, mut timestamp: u64) {
