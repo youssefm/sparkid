@@ -55,7 +55,7 @@ Tests cover: ID format, timestamp encoding, counter monotonicity, carry propagat
 
 ## Algorithm (all implementations are identical)
 
-IDs are 22-char fixed-length Base58 strings: `[8 timestamp][6 counter][8 random]`
+IDs are 21-char fixed-length Base58 strings: `[8 timestamp][6 counter][7 random]`
 
 - **Timestamp**: milliseconds since epoch, Base58-encoded big-endian
 - **Counter**: randomly seeded each new millisecond, incremented per-ID within same ms

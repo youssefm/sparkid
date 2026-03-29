@@ -17,13 +17,13 @@ use rand::{RngCore, SeedableRng};
 const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE: u64 = 58;
 
-// ID structure: [8-char timestamp][6-char counter][8-char random] = 22 chars
+// ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
 const COUNTER_CHAR_COUNT: usize = 6;
-const RANDOM_CHAR_COUNT: usize = 8;
-const ID_LENGTH: usize = 22;
+const RANDOM_CHAR_COUNT: usize = 7;
+const ID_LENGTH: usize = 21;
 
 // How many random bytes to fetch per batch. After rejection sampling,
-// ~90.6% survive (58/64), yielding ~14848 valid chars (~1856 IDs).
+// ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
 const RANDOM_BATCH_SIZE: usize = 16384;
 
 const FIRST_BYTE: u8 = ALPHABET[0]; // b'1'
@@ -82,7 +82,7 @@ const IS_BASE58: [bool; 256] = {
 /// The error returned when parsing a string as a [`SparkId`] fails.
 ///
 /// Returned by [`SparkId::from_str`] and [`TryFrom<&str>`] when the input
-/// is not a valid 22-char Base58 ID.
+/// is not a valid 21-char Base58 ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseSparkIdError {
     kind: ParseErrorKind,
@@ -98,7 +98,7 @@ impl fmt::Display for ParseSparkIdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
             ParseErrorKind::InvalidLength(len) => {
-                write!(f, "invalid SparkId length: expected 22, got {len}")
+                write!(f, "invalid SparkId length: expected 21, got {len}")
             }
             ParseErrorKind::InvalidChar { byte, position } => {
                 write!(
@@ -111,9 +111,9 @@ impl fmt::Display for ParseSparkIdError {
     }
 }
 
-/// A unique, time-sortable, 22-char Base58 ID.
+/// A unique, time-sortable, 21-char Base58 ID.
 ///
-/// `SparkId` is a stack-allocated, `Copy` type that wraps `[u8; 22]`.
+/// `SparkId` is a stack-allocated, `Copy` type that wraps `[u8; 21]`.
 /// It dereferences to `&str` for zero-cost string access, and implements
 /// `Display` for formatting without heap allocation.
 ///
@@ -123,7 +123,7 @@ impl fmt::Display for ParseSparkIdError {
 /// use sparkid::SparkId;
 ///
 /// let id = SparkId::new();
-/// assert_eq!(id.len(), 22);
+/// assert_eq!(id.len(), 21);
 /// println!("{id}");              // Display, no allocation
 /// let s: &str = &id;             // Deref to &str, no allocation
 /// let owned: String = id.into(); // Into<String> when you need ownership
@@ -149,7 +149,7 @@ impl SparkId {
     ///
     /// ```
     /// let id = sparkid::SparkId::new();
-    /// assert_eq!(id.len(), 22);
+    /// assert_eq!(id.len(), 21);
     /// ```
     #[cfg(feature = "std")]
     #[allow(clippy::new_without_default)]
@@ -200,7 +200,7 @@ impl FromStr for SparkId {
 
     /// Parse a string as a `SparkId`.
     ///
-    /// Validates that the input is exactly 22 ASCII bytes, all from the
+    /// Validates that the input is exactly 21 ASCII bytes, all from the
     /// Base58 alphabet (`1-9`, `A-H`, `J-N`, `P-Z`, `a-k`, `m-z`).
     ///
     /// # Examples
@@ -243,12 +243,12 @@ impl<'a> TryFrom<&'a str> for SparkId {
     }
 }
 
-/// Generates 22-char, Base58, time-sortable, collision-resistant unique IDs.
+/// Generates 21-char, Base58, time-sortable, collision-resistant unique IDs.
 ///
 /// Each ID is composed of three parts:
 ///   - 8-char timestamp prefix  (milliseconds, Base58-encoded, sortable)
 ///   - 6-char monotonic counter (randomly seeded each millisecond, incremented)
-///   - 8-char random tail       (independently random per ID)
+///   - 7-char random tail       (independently random per ID)
 ///
 /// IDs are strictly monotonically increasing within a single generator instance:
 /// across milliseconds by the timestamp prefix, and within the same millisecond
@@ -259,16 +259,16 @@ impl<'a> TryFrom<&'a str> for SparkId {
 /// ```
 /// let mut gen = sparkid::IdGenerator::new();
 /// let id = gen.next_id();
-/// assert_eq!(id.len(), 22);
+/// assert_eq!(id.len(), 21);
 /// assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
 /// ```
 pub struct IdGenerator {
     timestamp_cache_ms: u64,
-    // Full 22-byte ID buffer maintained in place.
+    // Full 21-byte ID buffer maintained in place.
     // [0..8]  = timestamp prefix
     // [8..13] = counter head
     // [13]    = counter tail
-    // [14..22] = random tail (overwritten every call)
+    // [14..21] = random tail (overwritten every call)
     id_buffer: [u8; ID_LENGTH],
     // Counter tail — kept as separate field for fast successor lookup
     counter_tail: u8,
@@ -302,7 +302,7 @@ impl IdGenerator {
         }
     }
 
-    /// Generates a unique, time-sortable, 22-char Base58 ID.
+    /// Generates a unique, time-sortable, 21-char Base58 ID.
     ///
     /// Returns a stack-allocated [`SparkId`] with no heap allocation.
     /// IDs are strictly monotonically increasing within this generator instance.
@@ -315,7 +315,7 @@ impl IdGenerator {
     /// ```
     /// let mut gen = sparkid::IdGenerator::new();
     /// let id = gen.next_id();
-    /// assert_eq!(id.len(), 22);
+    /// assert_eq!(id.len(), 21);
     /// println!("{id}"); // no allocation
     /// ```
     #[cfg(feature = "std")]
@@ -324,7 +324,7 @@ impl IdGenerator {
         SparkId(self.id_buffer)
     }
 
-    /// Generates a unique, time-sortable, 22-char Base58 ID using the given
+    /// Generates a unique, time-sortable, 21-char Base58 ID using the given
     /// timestamp (milliseconds since Unix epoch).
     ///
     /// This is the `no_std`-compatible alternative to [`next_id`](Self::next_id).
@@ -338,7 +338,7 @@ impl IdGenerator {
     /// ```
     /// let mut gen = sparkid::IdGenerator::new();
     /// let id = gen.next_id_at(1_700_000_000_000);
-    /// assert_eq!(id.len(), 22);
+    /// assert_eq!(id.len(), 21);
     /// ```
     pub fn next_id_at(&mut self, timestamp_ms: u64) -> SparkId {
         self.advance(timestamp_ms);
@@ -369,10 +369,10 @@ impl IdGenerator {
         let position = self.random_position;
         self.random_position = position + RANDOM_CHAR_COUNT;
 
-        // Hot path: only write counter tail (1 byte) + random (8 bytes).
+        // Hot path: only write counter tail (1 byte) + random (7 bytes).
         // The prefix (8) and counter head (5) are already up to date in id_buffer.
         self.id_buffer[13] = self.counter_tail;
-        self.id_buffer[14..22].copy_from_slice(&self.random_buffer[position..position + RANDOM_CHAR_COUNT]);
+        self.id_buffer[14..21].copy_from_slice(&self.random_buffer[position..position + RANDOM_CHAR_COUNT]);
     }
 
     #[cfg(feature = "std")]

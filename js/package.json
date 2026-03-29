@@ -1,7 +1,7 @@
 {
   "name": "sparkid",
   "version": "1.2.0",
-  "description": "Fast, time-sortable, 22-char Base58 unique ID generator",
+  "description": "Fast, time-sortable, 21-char Base58 unique ID generator",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {

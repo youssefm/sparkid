@@ -1,11 +1,11 @@
 # sparkid
 
-Fast, monotonic, time-sortable, 22-char Base58 unique ID generator. Zero dependencies.
+Fast, monotonic, time-sortable, 21-char Base58 unique ID generator. Zero dependencies.
 
 ```
-1ocmpHE1bFnygEBAPTzMK4
-1ocmpHE1bFnygFv4Wp4dL2
-1ocmpHE1bFnygGoUXUL7Xo
+1ocmpHE1bFnygEBAPTzMK
+1ocmpHE1bFnygFv4Wp4dL
+1ocmpHE1bFnygGoUXUL7X
 ```
 
 ## Install
@@ -20,19 +20,19 @@ npm install sparkid
 import { generateId } from "sparkid";
 
 const id = generateId();
-// => "1ocmpHE1bFnygEBAPTzMK4"
+// => "1ocmpHE1bFnygEBAPTzMK"
 ```
 
 ## Properties
 
 | Property | Value |
 |---|---|
-| **Length** | 22 characters, fixed |
+| **Length** | 21 characters, fixed |
 | **Alphabet** | Base58 (no `0`, `O`, `I`, `l`) |
 | **Sortable** | Lexicographically, by creation time |
 | **Monotonic** | Strictly increasing within the process |
 | **URL-safe** | Yes |
-| **Collision resistance** | ~58^14 (~1.8 x 10^24) combinations per millisecond |
+| **Collision resistance** | ~58^13 (~8.4 x 10^22) combinations per millisecond |
 | **Randomness** | Cryptographically secure (`crypto.getRandomValues`) |
 
 ## How it works
@@ -40,11 +40,11 @@ const id = generateId();
 Each ID is composed of two parts:
 
 ```
-[8-char timestamp][14-char suffix]
+[8-char timestamp][13-char suffix]
 ```
 
 - **Timestamp** (8 chars): Current time in milliseconds, Base58-encoded. IDs generated in a later millisecond always sort after earlier ones.
-- **Suffix** (14 chars): Seeded from `crypto.getRandomValues` (rejection-sampled, no modulo bias) at the start of each millisecond, then monotonically incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Suffix** (13 chars): Seeded from `crypto.getRandomValues` (rejection-sampled, no modulo bias) at the start of each millisecond, then monotonically incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
 
 ## Ordering guarantees
 

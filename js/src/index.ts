@@ -2,16 +2,19 @@
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE = ALPHABET.length; // 58
 
-// ID structure: [8-char timestamp][6-char counter][8-char random] = 22 chars
+// ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
 const COUNTER_CHAR_COUNT = 6;
-const RANDOM_CHAR_COUNT = 8;
+const RANDOM_CHAR_COUNT = 7;
 
 // How many random bytes to fetch per batch. After rejection sampling,
-// ~90.6% survive (58/64), yielding ~14848 valid chars (~1856 IDs).
+// ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
 const RANDOM_BATCH_SIZE = 16384;
 
 // Timestamp encoding: remainder (0-57) -> single char
-const TIMESTAMP_LOOKUP: string[] = Array.from({ length: BASE }, (_, i) => ALPHABET[i]);
+const TIMESTAMP_LOOKUP: string[] = Array.from(
+  { length: BASE },
+  (_, i) => ALPHABET[i],
+);
 
 // Random encoding: for each byte 0-255, mask to 6 bits (0-63).
 // Values < 58 map to their alphabet char code; values >= 58 are rejected (0).
@@ -56,21 +59,43 @@ let randomCharPosition = 0;
 // tail char code is bumped via a single successor lookup — no string ops needed.
 // The prefix (8 chars) and counter head (5 chars) are pre-concatenated into a
 // single 13-char string so the final return is a 2-part concat:
-//   prefixPlusCounterHead + String.fromCharCode(counterTailCharCode, ...8 random chars)
+//   prefixPlusCounterHead + String.fromCharCode(counterTailCharCode, ...7 random chars)
 let prefixPlusCounterHead = "";
 let counterTailCharCode = FIRST_CHAR_CODE;
 
 function encodeTimestamp(timestamp: number): void {
   timestampCacheMs = timestamp;
   let remainder: number;
-  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char7 = TIMESTAMP_LOOKUP[remainder];
-  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char6 = TIMESTAMP_LOOKUP[remainder];
-  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char5 = TIMESTAMP_LOOKUP[remainder];
-  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char4 = TIMESTAMP_LOOKUP[remainder];
-  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char3 = TIMESTAMP_LOOKUP[remainder];
-  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char2 = TIMESTAMP_LOOKUP[remainder];
-  remainder = timestamp % BASE; timestamp = Math.trunc(timestamp / BASE); const char1 = TIMESTAMP_LOOKUP[remainder];
-  timestampCachePrefix = TIMESTAMP_LOOKUP[timestamp] + char1 + char2 + char3 + char4 + char5 + char6 + char7;
+  remainder = timestamp % BASE;
+  timestamp = Math.trunc(timestamp / BASE);
+  const char7 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE;
+  timestamp = Math.trunc(timestamp / BASE);
+  const char6 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE;
+  timestamp = Math.trunc(timestamp / BASE);
+  const char5 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE;
+  timestamp = Math.trunc(timestamp / BASE);
+  const char4 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE;
+  timestamp = Math.trunc(timestamp / BASE);
+  const char3 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE;
+  timestamp = Math.trunc(timestamp / BASE);
+  const char2 = TIMESTAMP_LOOKUP[remainder];
+  remainder = timestamp % BASE;
+  timestamp = Math.trunc(timestamp / BASE);
+  const char1 = TIMESTAMP_LOOKUP[remainder];
+  timestampCachePrefix =
+    TIMESTAMP_LOOKUP[timestamp] +
+    char1 +
+    char2 +
+    char3 +
+    char4 +
+    char5 +
+    char6 +
+    char7;
 }
 
 function refillRandom(): void {
@@ -100,9 +125,15 @@ function seedCounter(): void {
   const pos = randomCharPosition;
   randomCharPosition = pos + COUNTER_CHAR_COUNT;
   const buf = randomBuffers.charCodes;
-  prefixPlusCounterHead = timestampCachePrefix + String.fromCharCode(
-    buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3], buf[pos + 4]
-  );
+  prefixPlusCounterHead =
+    timestampCachePrefix +
+    String.fromCharCode(
+      buf[pos],
+      buf[pos + 1],
+      buf[pos + 2],
+      buf[pos + 3],
+      buf[pos + 4],
+    );
   counterTailCharCode = buf[pos + 5];
 }
 
@@ -113,14 +144,15 @@ function seedCounter(): void {
  * the counter head chars (positions 4 down to 0, stored at indices 12
  * down to 8 in prefixPlusCounterHead). On full overflow (all 6 counter
  * chars at max — practically impossible at ~38 billion increments per
- * ms), bumps the timestamp forward by 1ms and reseeds.
+ * ms), bumps the timestamp forward by 1 ms and reseeds.
  */
 function incrementCarry(): void {
   const pph = prefixPlusCounterHead;
   for (let i = 12; i >= 8; i--) {
     const next = SUCCESSOR[pph.charCodeAt(i)];
     if (next) {
-      prefixPlusCounterHead = pph.substring(0, i) + next + FIRST_CHAR.repeat(12 - i);
+      prefixPlusCounterHead =
+        pph.substring(0, i) + next + FIRST_CHAR.repeat(12 - i);
       counterTailCharCode = FIRST_CHAR_CODE;
       return;
     }
@@ -132,12 +164,12 @@ function incrementCarry(): void {
 }
 
 /**
- * Generate a unique, time-sortable, 22-char Base58 ID.
+ * Generate a unique, time-sortable, 21-char Base58 ID.
  *
  * Each ID is composed of three parts:
  *   - 8-char timestamp prefix   (milliseconds, Base58-encoded, sortable)
  *   - 6-char monotonic counter  (randomly seeded each ms, incremented)
- *   - 8-char random tail        (independently random per ID)
+ *   - 7-char random tail        (independently random per ID)
  *
  * IDs are strictly monotonically increasing within a single process:
  * across milliseconds by the timestamp prefix, and within the same millisecond
@@ -149,11 +181,11 @@ function incrementCarry(): void {
  * unpredictable even when the counter value can be inferred.
  *
  * Properties:
- *   - 22 characters, fixed length
+ *   - 21 characters, fixed length
  *   - Lexicographically sortable by creation time
  *   - Monotonically increasing (within a single process)
  *   - URL-safe, no ambiguous characters
- *   - ~58^14 (~1.8 x 10^24) total combinations per millisecond
+ *   - ~58^13 (~8.4 x 10^22) total combinations per millisecond
  *   - Cryptographically secure randomness (crypto.getRandomValues)
  *
  * Works in Node.js (>=19), browsers, Deno, Bun, and Cloudflare Workers.
@@ -182,12 +214,20 @@ export function generateId(): string {
   const pos = randomCharPosition;
   randomCharPosition = pos + RANDOM_CHAR_COUNT;
 
-  // Build the 22-char ID as a 2-part concat: cached 13-char prefix + 9-char suffix.
+  // Build the 21-char ID as a 2-part concat: cached 13-char prefix + 8-char suffix.
   // The suffix is built via String.fromCharCode to produce a flat string directly.
   const buf = randomBuffers.charCodes;
-  return prefixPlusCounterHead + String.fromCharCode(
-    counterTailCharCode,
-    buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3],
-    buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]
+  return (
+    prefixPlusCounterHead +
+    String.fromCharCode(
+      counterTailCharCode,
+      buf[pos],
+      buf[pos + 1],
+      buf[pos + 2],
+      buf[pos + 3],
+      buf[pos + 4],
+      buf[pos + 5],
+      buf[pos + 6],
+    )
   );
 }

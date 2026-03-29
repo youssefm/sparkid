@@ -28,7 +28,7 @@ def verify() -> None:
     for _ in range(50_000):
         id_ = generate_id()
 
-        if len(id_) != 22:
+        if len(id_) != 21:
             raise AssertionError(f"wrong length: {id_} ({len(id_)})")
         if not set(id_) <= valid:
             raise AssertionError(f"invalid chars in: {id_}")
@@ -119,7 +119,7 @@ def run_comparison() -> None:
         {
             "name": "sparkid",
             "generate": generate_id,
-            "length": "22",
+            "length": "21",
             "sortable": "yes",
             "format": "Base58",
         },

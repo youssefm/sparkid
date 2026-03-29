@@ -7,9 +7,9 @@ import weakref
 ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 BASE = len(ALPHABET)  # 58
 
-# ID structure: [8-char timestamp][6-char counter][8-char random] = 22 chars
+# ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
 _COUNTER_CHAR_COUNT = 6
-_RANDOM_CHAR_COUNT = 8
+_RANDOM_CHAR_COUNT = 7
 
 # How many random bytes to fetch per batch. After rejection sampling,
 # ~90.6% survive (58/64), yielding ~232 valid chars.
@@ -50,12 +50,12 @@ _all_generators: weakref.WeakSet["IdGenerator"] = weakref.WeakSet()
 
 
 class IdGenerator:
-    """Generates 22-char, Base58, time-sortable, collision-resistant unique IDs.
+    """Generates 21-char, Base58, time-sortable, collision-resistant unique IDs.
 
     Each ID is composed of three parts:
       - 8-char timestamp prefix  (milliseconds, Base58-encoded, sortable)
       - 6-char monotonic counter (randomly seeded each millisecond, incremented)
-      - 8-char random tail       (independently random per ID, from os.urandom)
+      - 7-char random tail       (independently random per ID, from os.urandom)
 
     IDs are strictly monotonically increasing within a single generator instance:
     across milliseconds by the timestamp prefix, and within the same millisecond
@@ -70,14 +70,14 @@ class IdGenerator:
     On the hot path (same millisecond, no carry), the counter tail is a single
     string char bumped via a successor lookup, and the random tail is decoded
     from the pre-sampled byte buffer. The return is a 3-part string concat:
-    prefix_plus_counter_head (13 chars) + counter_tail (1 char) + random (8 chars).
+    prefix_plus_counter_head (13 chars) + counter_tail (1 char) + random (7 chars).
 
     Properties:
-      - 22 characters, fixed length
+      - 21 characters, fixed length
       - Lexicographically sortable by creation time
       - Monotonically increasing (within a single generator instance)
       - URL-safe, no ambiguous characters
-      - ~58^14 (~1.8 x 10^24) total combinations per millisecond
+      - ~58^13 (~8.4 x 10^22) total combinations per millisecond
       - Cryptographically secure randomness (os.urandom)
 
     Thread safety: each IdGenerator instance is designed for use by a single
@@ -245,7 +245,7 @@ os.register_at_fork(after_in_child=_after_fork_in_child)
 
 
 def generate_id() -> str:
-    """Generate a unique, time-sortable, 22-char Base58 ID.
+    """Generate a unique, time-sortable, 21-char Base58 ID.
 
     Thread-safe via threading.local. IDs are strictly monotonically increasing
     within each thread; across threads they are unique but unordered.

@@ -16,7 +16,7 @@ function verify(): void {
   for (let i = 0; i < 50_000; i++) {
     const id = generateId();
 
-    if (id.length !== 22) {
+    if (id.length !== 21) {
       throw new Error(`wrong length: ${id} (${id.length})`);
     }
     for (const char of id) {
@@ -141,7 +141,7 @@ async function runComparison(): Promise<void> {
     {
       name: "sparkid",
       generate: generateId,
-      length: "22",
+      length: "21",
       sortable: "yes",
       format: "Base58",
     },

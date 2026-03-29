@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "sparkid"
 version = "1.2.0"
-description = "Fast, time-sortable, 22-char Base58 unique ID generator"
+description = "Fast, time-sortable, 21-char Base58 unique ID generator"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"

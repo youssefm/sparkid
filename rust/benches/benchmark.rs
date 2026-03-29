@@ -31,7 +31,7 @@ fn verify() {
     let mut ids: Vec<SparkId> = Vec::with_capacity(50_000);
     for _ in 0..50_000 {
         let id = gen.next_id();
-        assert_eq!(id.len(), 22, "wrong length");
+        assert_eq!(id.len(), 21, "wrong length");
         for ch in id.chars() {
             assert!(valid_chars.contains(&ch), "invalid char: {ch}");
         }

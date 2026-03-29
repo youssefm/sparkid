@@ -1,11 +1,11 @@
 # sparkid
 
-Fast, monotonic, time-sortable, 22-char Base58 unique ID generator. Only dependency is `rand`.
+Fast, monotonic, time-sortable, 21-char Base58 unique ID generator. Only dependency is `rand`.
 
 ```
-1ocmpHE1bFnygEBAPTzMK4
-1ocmpHE1bFnygFv4Wp4dL2
-1ocmpHE1bFnygGoUXUL7Xo
+1ocmpHE1bFnygEBAPTzMK
+1ocmpHE1bFnygFv4Wp4dL
+1ocmpHE1bFnygGoUXUL7X
 ```
 
 ## Install
@@ -20,7 +20,7 @@ cargo add sparkid
 use sparkid::SparkId;
 
 let id = SparkId::new();
-// => "1ocmpHE1bFnygEBAPTzMK4"
+// => "1ocmpHE1bFnygEBAPTzMK"
 
 println!("{id}");              // Display, no heap allocation
 let s: &str = &id;             // Deref to &str, zero-cost
@@ -31,12 +31,12 @@ let owned: String = id.into(); // Into<String> when needed
 
 | Property | Value |
 |---|---|
-| **Length** | 22 characters, fixed |
+| **Length** | 21 characters, fixed |
 | **Alphabet** | Base58 (no `0`, `O`, `I`, `l`) |
 | **Sortable** | Lexicographically, by creation time |
 | **Monotonic** | Strictly increasing within each thread |
 | **URL-safe** | Yes |
-| **Collision resistance** | ~58^14 (~1.8 x 10^24) combinations per millisecond |
+| **Collision resistance** | ~58^13 (~8.4 x 10^22) combinations per millisecond |
 | **Randomness** | Cryptographically secure (`rand` / ChaCha12, seeded from OS) |
 | **Thread-safe** | Yes (via `thread_local!`) |
 
@@ -45,11 +45,11 @@ let owned: String = id.into(); // Into<String> when needed
 Each ID is composed of two parts:
 
 ```
-[8-char timestamp][14-char suffix]
+[8-char timestamp][13-char suffix]
 ```
 
 - **Timestamp** (8 chars): Current time in milliseconds, Base58-encoded. IDs generated in a later millisecond always sort after earlier ones.
-- **Suffix** (14 chars): Seeded from a cryptographically secure PRNG (rejection-sampled, no modulo bias) at the start of each millisecond, then monotonically incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Suffix** (13 chars): Seeded from a cryptographically secure PRNG (rejection-sampled, no modulo bias) at the start of each millisecond, then monotonically incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
 
 ## `SparkId` type
 

@@ -27,7 +27,7 @@ class TestIdFormat:
     def test_length(self):
         gen = IdGenerator()
         for _ in range(1000):
-            assert len(gen()) == 22
+            assert len(gen()) == 21
 
     def test_charset(self):
         gen = IdGenerator()
@@ -46,7 +46,7 @@ class TestIdFormat:
             assert gen().isalnum()
 
     def test_structure_parts(self):
-        """ID has 8-char timestamp, 6-char counter, 8-char random."""
+        """ID has 8-char timestamp, 6-char counter, 7-char random."""
         gen = IdGenerator()
         id_ = gen()
         ts = id_[:8]
@@ -54,7 +54,7 @@ class TestIdFormat:
         random_tail = id_[14:]
         assert len(ts) == 8
         assert len(counter) == 6
-        assert len(random_tail) == 8
+        assert len(random_tail) == 7
         assert set(ts) <= VALID_CHARS
         assert set(counter) <= VALID_CHARS
         assert set(random_tail) <= VALID_CHARS
@@ -181,9 +181,9 @@ class TestCounterMonotonicity:
         fixed_ts = int(time.time() * 1000) + 100_000
         with patch("sparkid._generator._time_ns", return_value=fixed_ts * 1_000_000):
             ids = [gen() for _ in range(500)]
-        assert all(id_[:8] == ids[0][:8] for id_ in ids), (
-            "all IDs should share timestamp"
-        )
+        assert all(
+            id_[:8] == ids[0][:8] for id_ in ids
+        ), "all IDs should share timestamp"
         for i in range(1, len(ids)):
             assert ids[i][8:14] > ids[i - 1][8:14]
 
@@ -261,7 +261,7 @@ class TestCounterCarry:
         gen._increment_counter_carry()
 
         id_ = gen()
-        assert len(id_) == 22
+        assert len(id_) == 21
         assert set(id_) <= VALID_CHARS
 
     def test_carry_maintains_monotonicity(self):
@@ -527,7 +527,7 @@ class TestForkSafety:
             gen()
         gen._reset_state()
         id_ = gen()
-        assert len(id_) == 22
+        assert len(id_) == 21
         assert set(id_) <= VALID_CHARS
 
     def test_after_fork_resets_all_generators(self):
@@ -587,14 +587,14 @@ class TestPublicAPI:
 
     def test_generate_id_format(self):
         id_ = generate_id()
-        assert len(id_) == 22
+        assert len(id_) == 21
         assert set(id_) <= VALID_CHARS
 
     def test_id_generator_callable(self):
         gen = IdGenerator()
         id_ = gen()
         assert isinstance(id_, str)
-        assert len(id_) == 22
+        assert len(id_) == 21
 
     def test_multiple_generators_independent(self):
         gen1 = IdGenerator()

@@ -34,7 +34,7 @@ fn current_time_ms() -> u64 {
 fn test_length() {
     let mut gen = IdGenerator::new();
     for _ in 0..1000 {
-        assert_eq!(gen.next_id().len(), 22);
+        assert_eq!(gen.next_id().len(), 21);
     }
 }
 
@@ -84,7 +84,7 @@ fn test_structure_parts() {
     let random_tail = &id[14..];
     assert_eq!(ts.len(), 8);
     assert_eq!(counter.len(), 6);
-    assert_eq!(random_tail.len(), 8);
+    assert_eq!(random_tail.len(), 7);
     for ch in ts.chars().chain(counter.chars()).chain(random_tail.chars()) {
         assert!(valid.contains(&ch));
     }
@@ -328,7 +328,7 @@ fn test_full_overflow_produces_valid_id() {
     gen.increment_carry_test();
 
     let id = gen.next_id();
-    assert_eq!(id.len(), 22);
+    assert_eq!(id.len(), 21);
     for ch in id.chars() {
         assert!(valid.contains(&ch));
     }
@@ -598,7 +598,7 @@ fn test_sparkid_new_per_thread_isolation() {
 fn test_sparkid_new_returns_valid() {
     let valid = valid_chars();
     let id = SparkId::new();
-    assert_eq!(id.len(), 22);
+    assert_eq!(id.len(), 21);
     for ch in id.chars() {
         assert!(valid.contains(&ch));
     }
@@ -608,7 +608,7 @@ fn test_sparkid_new_returns_valid() {
 fn test_id_generator_next_id() {
     let mut gen = IdGenerator::new();
     let id = gen.next_id();
-    assert_eq!(id.len(), 22);
+    assert_eq!(id.len(), 21);
 }
 
 #[test]
@@ -646,7 +646,7 @@ fn test_stress_2m_ids() {
 
     for i in 1..2_000_000 {
         let id = gen.next_id();
-        assert_eq!(id.len(), 22);
+        assert_eq!(id.len(), 21);
         assert!(id > prev, "Not monotonic at {i}");
         for ch in id.chars() {
             assert!(valid.contains(&ch));
@@ -665,7 +665,7 @@ fn test_stress_2m_ids() {
 #[test]
 fn test_sparkid_new() {
     let id = SparkId::new();
-    assert_eq!(id.len(), 22);
+    assert_eq!(id.len(), 21);
     assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
 }
 
@@ -674,14 +674,14 @@ fn test_sparkid_display_no_alloc() {
     let id = SparkId::new();
     let displayed = format!("{id}");
     assert_eq!(displayed, id.as_ref());
-    assert_eq!(displayed.len(), 22);
+    assert_eq!(displayed.len(), 21);
 }
 
 #[test]
 fn test_sparkid_deref_to_str() {
     let id = SparkId::new();
     let s: &str = &id;
-    assert_eq!(s.len(), 22);
+    assert_eq!(s.len(), 21);
     assert_eq!(s, id.as_ref());
 }
 
@@ -764,7 +764,7 @@ fn test_next_id_at_valid_format() {
     let ts = current_time_ms();
     for i in 0..1000 {
         let id = gen.next_id_at(ts + i);
-        assert_eq!(id.len(), 22);
+        assert_eq!(id.len(), 21);
         for ch in id.chars() {
             assert!(valid.contains(&ch), "invalid char: {ch}");
         }
@@ -846,7 +846,7 @@ fn test_next_id_at_matches_next_id_behavior() {
     let before = current_time_ms();
     let id = gen.next_id_at(before);
     let after = current_time_ms();
-    assert_eq!(id.len(), 22);
+    assert_eq!(id.len(), 21);
     for ch in id.chars() {
         assert!(valid.contains(&ch));
     }
@@ -892,7 +892,7 @@ fn test_parse_wrong_length_short() {
     let result: Result<SparkId, ParseSparkIdError> = "abc".parse();
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.to_string().contains("expected 22, got 3"), "{err}");
+    assert!(err.to_string().contains("expected 21, got 3"), "{err}");
 }
 
 #[test]
@@ -900,7 +900,7 @@ fn test_parse_wrong_length_long() {
     let result = "1".repeat(23).parse::<SparkId>();
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.to_string().contains("expected 22, got 23"), "{err}");
+    assert!(err.to_string().contains("expected 21, got 23"), "{err}");
 }
 
 #[test]
@@ -908,13 +908,13 @@ fn test_parse_empty_string() {
     let result = "".parse::<SparkId>();
     assert!(result.is_err());
     let err = result.unwrap_err();
-    assert!(err.to_string().contains("expected 22, got 0"), "{err}");
+    assert!(err.to_string().contains("expected 21, got 0"), "{err}");
 }
 
 #[test]
 fn test_parse_invalid_char_zero() {
     // '0' is excluded from Base58
-    let input = "0".repeat(22);
+    let input = "0".repeat(21);
     let result = input.parse::<SparkId>();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -926,7 +926,7 @@ fn test_parse_invalid_char_zero() {
 fn test_parse_invalid_char_ambiguous() {
     // 'O', 'I', 'l' are excluded from Base58
     for (ch, pos) in [('O', 5), ('I', 10), ('l', 20)] {
-        let mut chars: Vec<char> = "1".repeat(22).chars().collect();
+        let mut chars: Vec<char> = "1".repeat(21).chars().collect();
         chars[pos] = ch;
         let input: String = chars.into_iter().collect();
         let result = input.parse::<SparkId>();
@@ -942,7 +942,7 @@ fn test_parse_invalid_char_ambiguous() {
 
 #[test]
 fn test_parse_invalid_char_special() {
-    let mut input = "1".repeat(22);
+    let mut input = "1".repeat(21);
     // Replace middle char with a non-alphanumeric
     input.replace_range(11..12, "-");
     let result = input.parse::<SparkId>();
@@ -955,7 +955,7 @@ fn test_parse_invalid_char_special() {
 #[test]
 fn test_parse_reports_first_invalid_char() {
     // Multiple bad chars — should report the first one
-    let input = "0OIl".to_string() + &"1".repeat(18);
+    let input = "0OIl".to_string() + &"1".repeat(17);
     let result = input.parse::<SparkId>();
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -964,9 +964,9 @@ fn test_parse_reports_first_invalid_char() {
 
 #[test]
 fn test_parse_all_valid_alphabet_chars() {
-    // Build a 22-char string from the alphabet (wrapping)
+    // Build a 21-char string from the alphabet (wrapping)
     let alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let input: String = alphabet.chars().cycle().take(22).collect();
+    let input: String = alphabet.chars().cycle().take(21).collect();
     let result = input.parse::<SparkId>();
     assert!(result.is_ok());
     assert_eq!(&*result.unwrap(), input);
@@ -992,7 +992,7 @@ fn test_parse_error_is_debug_and_display() {
     assert!(!debug.is_empty());
     // Display
     let display = format!("{err}");
-    assert!(display.contains("22"));
+    assert!(display.contains("21"));
 }
 
 #[test]

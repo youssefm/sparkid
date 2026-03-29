@@ -6,12 +6,12 @@
 [![PyPI](https://img.shields.io/pypi/v/sparkid)](https://pypi.org/project/sparkid/)
 [![crates.io](https://img.shields.io/crates/v/sparkid)](https://crates.io/crates/sparkid)
 
-Fast, monotonic, time-sortable, 22-char Base58 unique ID generator. Zero dependencies.
+Fast, monotonic, time-sortable, 21-char Base58 unique ID generator. Zero dependencies.
 
 ```
-1ocmpHE1bFnygEBAPTzMK4
-1ocmpHE1bFnygFv4Wp4dL2
-1ocmpHE1bFnygGoUXUL7Xo
+1ocmpHE1bFnygEBAPTzMK
+1ocmpHE1bFnygFv4Wp4dL
+1ocmpHE1bFnygGoUXUL7X
 ```
 
 Available for [JavaScript/TypeScript](#javascript), [Python](#python), and [Rust](#rust).
@@ -20,7 +20,7 @@ Available for [JavaScript/TypeScript](#javascript), [Python](#python), and [Rust
 
 | | sparkid | UUID v4 | UUID v7 | nanoid | ULID |
 |---|---|---|---|---|---|
-| **Length** | 22 | 36 | 36 | 21 | 26 |
+| **Length** | 21 | 36 | 36 | 21 | 26 |
 | **Sortable** | Yes | No | Yes | No | Yes |
 | **Monotonic** | Yes | No | No | No | No |
 | **URL-safe** | Yes | No | No | Yes | Yes |
@@ -30,15 +30,15 @@ sparkid gives you compact, readable IDs that sort by creation time and are stric
 
 ## How it works
 
-Each ID is 22 characters built from three parts:
+Each ID is 21 characters built from three parts:
 
 ```
-[8-char timestamp][6-char counter][8-char random]
+[8-char timestamp][6-char counter][7-char random]
 ```
 
 - **Timestamp** — current millisecond, Base58-encoded. IDs from a later millisecond always sort after earlier ones.
 - **Counter** — randomly seeded each new millisecond, then incremented for each ID within that millisecond. Guarantees strict monotonic ordering even at high throughput.
-- **Random** — 8 characters of cryptographically secure randomness per ID, rejection-sampled to avoid modulo bias. Provides ~58^14 (~1.8 x 10^24) combinations per millisecond for collision resistance.
+- **Random** — 7 characters of cryptographically secure randomness per ID, rejection-sampled to avoid modulo bias. Provides ~58^13 (~8.4 x 10^22) combinations per millisecond for collision resistance.
 
 The Base58 alphabet (`123456789ABC...xyz`) excludes visually ambiguous characters (`0`, `O`, `I`, `l`), making IDs safe to copy, paste, and read aloud.
 

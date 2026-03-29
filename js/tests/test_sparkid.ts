@@ -5,8 +5,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { generateId } from "../src/index.ts";
 
-const ALPHABET =
-  "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE = ALPHABET.length; // 58
 const VALID_CHARS = new Set(ALPHABET);
 
@@ -26,9 +25,9 @@ function decodeTimestamp(encoded: string): number {
 // ---------------------------------------------------------------------------
 
 describe("ID format", () => {
-  it("is always 22 characters", () => {
+  it("is always 21 characters", () => {
     for (let i = 0; i < 1000; i++) {
-      assert.equal(generateId().length, 22);
+      assert.equal(generateId().length, 21);
     }
   });
 
@@ -50,14 +49,14 @@ describe("ID format", () => {
     }
   });
 
-  it("has 8-char timestamp, 6-char counter, 8-char random", () => {
+  it("has 8-char timestamp, 6-char counter, 7-char random", () => {
     const id = generateId();
     const ts = id.slice(0, 8);
     const counter = id.slice(8, 14);
     const random = id.slice(14);
     assert.equal(ts.length, 8);
     assert.equal(counter.length, 6);
-    assert.equal(random.length, 8);
+    assert.equal(random.length, 7);
     for (const part of [ts, counter, random]) {
       for (const ch of part) {
         assert.ok(VALID_CHARS.has(ch));
@@ -78,7 +77,7 @@ describe("Timestamp encoding", () => {
     const decoded = decodeTimestamp(id.slice(0, 8));
     assert.ok(
       decoded >= before && decoded <= after,
-      `decoded timestamp ${decoded} not in [${before}, ${after}]`
+      `decoded timestamp ${decoded} not in [${before}, ${after}]`,
     );
   });
 
@@ -99,14 +98,16 @@ describe("Timestamp encoding", () => {
       decoded.push(decodeTimestamp(id.slice(0, 8)));
       // Busy-wait to cross a millisecond boundary occasionally
       const start = Date.now();
-      while (Date.now() === start) { /* spin */ }
+      while (Date.now() === start) {
+        /* spin */
+      }
     }
     // Lexicographic order must match numeric order
     for (let i = 1; i < prefixes.length; i++) {
       if (decoded[i] > decoded[i - 1]) {
         assert.ok(
           prefixes[i] > prefixes[i - 1],
-          `prefix order doesn't match numeric order at ${i}`
+          `prefix order doesn't match numeric order at ${i}`,
         );
       }
     }
@@ -150,7 +151,7 @@ describe("Counter monotonicity", () => {
     for (let i = 1; i < sameTs.length; i++) {
       assert.ok(
         sameTs[i].slice(8, 14) > sameTs[i - 1].slice(8, 14),
-        `counter not increasing at ${i}`
+        `counter not increasing at ${i}`,
       );
     }
   });
@@ -287,7 +288,7 @@ describe("Random tail", () => {
     const counts = new Map<string, number>();
     for (let i = 0; i < n; i++) {
       const id = generateId();
-      for (let j = 14; j < 22; j++) {
+      for (let j = 14; j < 21; j++) {
         const ch = id[j];
         counts.set(ch, (counts.get(ch) || 0) + 1);
       }
@@ -302,7 +303,7 @@ describe("Random tail", () => {
     // With 57 df, chi^2 > 120 would be extreme
     assert.ok(
       chiSq < 120,
-      `chi^2=${chiSq.toFixed(1)} suggests non-uniform distribution`
+      `chi^2=${chiSq.toFixed(1)} suggests non-uniform distribution`,
     );
   });
 
@@ -320,7 +321,7 @@ describe("Random tail", () => {
     const counts = new Map<string, number>();
     for (let i = 0; i < n; i++) {
       const id = generateId();
-      for (let j = 14; j < 22; j++) {
+      for (let j = 14; j < 21; j++) {
         counts.set(id[j], (counts.get(id[j]) || 0) + 1);
       }
     }
@@ -330,7 +331,7 @@ describe("Random tail", () => {
     // With uniform distribution, max/min ratio should be very close to 1
     assert.ok(
       max / min < 1.05,
-      `max/min ratio ${(max / min).toFixed(4)} suggests bias`
+      `max/min ratio ${(max / min).toFixed(4)} suggests bias`,
     );
   });
 });
@@ -350,7 +351,7 @@ describe("Stress test", () => {
 
     for (let i = 0; i < n; i++) {
       const id = generateId();
-      if (id.length !== 22) lengthBugs++;
+      if (id.length !== 21) lengthBugs++;
       if (id <= prev) monoBugs++;
       if (seen.has(id)) dupBugs++;
       prev = id;
@@ -358,7 +359,7 @@ describe("Stress test", () => {
       if (i < 500_000) seen.add(id);
     }
 
-    assert.equal(lengthBugs, 0, "all IDs should be 22 chars");
+    assert.equal(lengthBugs, 0, "all IDs should be 21 chars");
     assert.equal(monoBugs, 0, "all IDs should be strictly increasing");
     assert.equal(dupBugs, 0, "no duplicates in first 500k");
   });
