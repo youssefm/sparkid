@@ -66,7 +66,7 @@ function verify(): void {
 
 function benchCandidate(
   generate: () => string,
-  verbose = false
+  verbose = false,
 ): { medianUs: number; medianThroughput: number } {
   for (let i = 0; i < WARMUP; i++) {
     generate();
@@ -87,7 +87,7 @@ function benchCandidate(
     if (verbose) {
       const throughput = Math.round(ITERATIONS / (elapsedNs / 1_000_000_000));
       console.log(
-        `  trial ${trial + 1}: ${perCallUs.toFixed(3)} µs/call  ${throughput.toLocaleString()} ids/sec`
+        `  trial ${trial + 1}: ${perCallUs.toFixed(3)} µs/call  ${throughput.toLocaleString()} ids/sec`,
       );
     }
   }
@@ -109,7 +109,7 @@ function benchmark(): void {
 
   console.log();
   console.log(
-    `  median: ${medianUs.toFixed(3)} µs/call  ${medianThroughput.toLocaleString()} ids/sec`
+    `  median: ${medianUs.toFixed(3)} µs/call  ${medianThroughput.toLocaleString()} ids/sec`,
   );
   console.log();
 
@@ -184,12 +184,13 @@ async function runComparison(): Promise<void> {
     console.log("  ⚠ nanoid not installed, skipping (npm i nanoid)");
   }
 
-  // ulid
+  // ulid (monotonic — fair comparison since sparkid is monotonic)
   try {
-    const { ulid } = await import("ulid");
+    const { monotonicFactory } = await import("ulid");
+    const ulidMonotonic = monotonicFactory();
     candidates.push({
       name: "ulid",
-      generate: ulid,
+      generate: ulidMonotonic,
       length: "26",
       sortable: "yes",
       format: "Crockford Base32",
@@ -261,7 +262,7 @@ async function runComparison(): Promise<void> {
         r.sortable.padStart(sortW),
         r.format.padEnd(fmtW),
         r.sample,
-      ].join("  ")
+      ].join("  "),
     );
   }
 

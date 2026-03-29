@@ -107,9 +107,10 @@ fn bench_comparison(c: &mut Criterion) {
 
     group.bench_function("nanoid", |b| b.iter(|| nanoid::nanoid!()));
 
-    // ulid — returns Copy type Ulid, then .to_string() for fair comparison
+    // ulid (monotonic — fair comparison since sparkid is monotonic)
+    let mut ulid_gen = ulid::Generator::new();
     group.bench_function("ulid", |b| {
-        b.iter(|| ulid::Ulid::new().to_string())
+        b.iter(|| ulid_gen.generate().unwrap().to_string())
     });
 
     group.finish();
