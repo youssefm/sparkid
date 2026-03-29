@@ -18,13 +18,13 @@ Available for [JavaScript/TypeScript](#javascript), [Python](#python), and [Rust
 
 ## Why sparkid?
 
-| | sparkid | UUID v4 | UUID v7 | nanoid | ULID |
-|---|---|---|---|---|---|
-| **Length** | 21 | 36 | 36 | 21 | 26 |
-| **Sortable** | Yes | No | Yes | No | Yes |
-| **Monotonic** | Yes | No | No | No | No |
-| **URL-safe** | Yes | No | No | Yes | Yes |
-| **Alphabet** | Base58 | Hex | Hex | URL-safe | Crockford32 |
+| | sparkid | UUID v4 | UUID v7 | nanoid |
+|---|---|---|---|---|
+| **Length** | 21 | 36 | 36 | 21 |
+| **Sortable** | Yes | No | Yes | No |
+| **Monotonic** | Yes | No | No | No |
+| **URL-safe** | Yes | No | No | Yes |
+| **Alphabet** | Base58 | Hex | Hex | URL-safe |
 
 sparkid gives you compact, readable IDs that sort by creation time and are strictly monotonically increasing — no two IDs from the same generator will ever compare equal or out of order.
 
