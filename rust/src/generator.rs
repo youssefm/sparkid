@@ -229,9 +229,8 @@ impl FromStr for SparkId {
                 });
             }
         }
-        let mut buf = [0u8; ID_LENGTH];
-        buf.copy_from_slice(bytes);
-        Ok(SparkId(buf))
+        // Safety: length already validated above, unwrap cannot fail.
+        Ok(SparkId(bytes.try_into().unwrap()))
     }
 }
 
