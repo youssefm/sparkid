@@ -54,7 +54,7 @@ import { generateId } from "sparkid";
 const id = generateId();
 ```
 
-~22 million IDs/sec on Node.js. Works in Node >= 19, browsers, Deno, Bun, and Cloudflare Workers.
+Works in Node >= 19, browsers, Deno, Bun, and Cloudflare Workers.
 
 All IDs from `generateId()` are strictly monotonically increasing within the process. Since JavaScript is single-threaded, this means process-wide ordering with no coordination needed.
 
@@ -72,7 +72,7 @@ from sparkid import generate_id
 id = generate_id()
 ```
 
-~3 million IDs/sec on Python 3.14. Thread-safe via `threading.local` (one generator per thread). Fork-safe via `os.register_at_fork`.
+Thread-safe via `threading.local` (one generator per thread). Fork-safe via `os.register_at_fork`.
 
 IDs from a single thread are strictly monotonically increasing. Across threads, IDs are unique but unordered. For process-wide monotonic ordering, wrap an `IdGenerator` in a lock — see [python/README.md](python/README.md) for details.
 
@@ -88,7 +88,7 @@ use sparkid::SparkId;
 let id = SparkId::new();
 ```
 
-~27 million IDs/sec. `SparkId` is a stack-allocated, `Copy` type — no heap allocation. Thread-safe via `thread_local!` (one generator per thread). Only dependency is `rand` (userspace CSPRNG).
+`SparkId` is a stack-allocated, `Copy` type — no heap allocation. Thread-safe via `thread_local!` (one generator per thread). Only dependency is `rand` (userspace CSPRNG).
 
 IDs from a single thread are strictly monotonically increasing. Across threads, IDs are unique but unordered. For manual control, use `IdGenerator` directly — see [rust/README.md](rust/README.md) for details.
 

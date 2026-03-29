@@ -105,8 +105,6 @@ let ids: Vec<sparkid::SparkId> = gen.take(100).collect();
 
 ## Performance
 
-~27 million IDs/sec with `SparkId::new()` (~37 ns/call, zero-allocation):
-
 ```bash
 cargo bench
 ```

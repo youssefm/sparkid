@@ -82,8 +82,6 @@ Each `IdGenerator` instance maintains its own internal state. The module-level `
 
 ## Performance
 
-~3 million IDs/sec on Python 3.14 (~0.33 µs/call):
-
 ```bash
 python bench/benchmark.py
 ```
