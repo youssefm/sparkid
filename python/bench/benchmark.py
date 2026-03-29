@@ -7,6 +7,9 @@ import time
 import uuid
 from collections.abc import Callable
 
+if sys.version_info < (3, 14):
+    sys.exit("benchmark requires Python 3.14+ (for stdlib uuid.uuid7)")
+
 from sparkid import IdGenerator
 
 generate_id = IdGenerator()
@@ -133,43 +136,16 @@ def run_comparison() -> None:
         }
     )
 
-    # uuid7 (Python 3.14+ stdlib or uuid-utils / uuid7 package)
-    if hasattr(uuid, "uuid7"):
-        candidates.append(
-            {
-                "name": "uuid7",
-                "generate": lambda: str(uuid.uuid7()),
-                "length": "36",
-                "sortable": "yes",
-                "format": "hex+dashes",
-            }
-        )
-    else:
-        try:
-            uuid_utils = importlib.import_module("uuid_utils")
-            candidates.append(
-                {
-                    "name": "uuid7",
-                    "generate": lambda: str(uuid_utils.uuid7()),
-                    "length": "36",
-                    "sortable": "yes",
-                    "format": "hex+dashes",
-                }
-            )
-        except ImportError:
-            try:
-                uuid7_mod = importlib.import_module("uuid7")
-                candidates.append(
-                    {
-                        "name": "uuid7",
-                        "generate": lambda: str(uuid7_mod.uuid7()),
-                        "length": "36",
-                        "sortable": "yes",
-                        "format": "hex+dashes",
-                    }
-                )
-            except ImportError:
-                print("  ⚠ uuid7 not available, skipping (pip install uuid-utils)")
+    # uuid7 (Python 3.14+ stdlib)
+    candidates.append(
+        {
+            "name": "uuid7",
+            "generate": lambda: str(uuid.uuid7()),
+            "length": "36",
+            "sortable": "yes",
+            "format": "hex+dashes",
+        }
+    )
 
     # nanoid
     try:
