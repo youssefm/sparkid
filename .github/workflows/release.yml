@@ -68,13 +68,15 @@ jobs:
             fi
           done
 
-  release:
+  # ── Prepare: calculate version, stamp manifests, build, commit + tag ──
+  prepare:
     needs: ci-check
     runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new }}
     steps:
       - uses: actions/checkout@v6
         with:
-          # Fetch full history so we can read current version from tags/files
           fetch-depth: 0
 
       # ── Calculate new version ──────────────────────────────────
@@ -117,7 +119,7 @@ jobs:
           # Only replace the version under [package], not under [dependencies]
           sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" rust/Cargo.toml
 
-      # ── Rebuild everything to verify ───────────────────────────
+      # ── Build all three packages ──────────────────────────────
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -137,53 +139,146 @@ jobs:
       - run: cargo build --release
         working-directory: rust
 
-      # ── Commit, tag, push (dry run) ────────────────────────────
+      # ── Commit, tag, push (skip if tag already exists) ─────────
       - name: Commit, tag, push (dry run)
         env:
           NEW_VERSION: ${{ steps.version.outputs.new }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "🏜️ DRY RUN — would commit, tag, and push:"
-          echo "  git commit -m \"chore: bump version to $NEW_VERSION\""
-          echo "  git tag v$NEW_VERSION"
-          echo "  git push origin main"
-          echo "  git push origin v$NEW_VERSION"
-          echo ""
-          echo "Stamped files:"
-          git diff --name-only
+          # Check if tag already exists on remote
+          if git ls-remote --tags origin "refs/tags/v$NEW_VERSION" | grep -q "v$NEW_VERSION"; then
+            echo "⏭️ Tag v$NEW_VERSION already exists on remote — skipping commit/tag/push"
+            echo "### ⏭️ Tag already exists — skipped commit/tag/push" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "🏜️ DRY RUN — would commit, tag, and push:"
+            echo "  git commit -m \"chore: bump version to $NEW_VERSION\""
+            echo "  git tag v$NEW_VERSION"
+            echo "  git push origin main"
+            echo "  git push origin v$NEW_VERSION"
+            echo ""
+            echo "Stamped files:"
+            git diff --name-only
+          fi
 
-      # ── GitHub Release (dry run) ───────────────────────────────
-      - name: Create GitHub Release (dry run)
+  # ── Publish to npm (parallel) ──────────────────────────────────
+  publish-npm:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Check if version already published to npm
+        id: check
         env:
-          NEW_VERSION: ${{ steps.version.outputs.new }}
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          if npm view "sparkid@$NEW_VERSION" version 2>/dev/null; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "⏭️ sparkid@$NEW_VERSION already exists on npm — skipping publish"
+            echo "### ⏭️ npm: already published" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "📦 sparkid@$NEW_VERSION not found on npm — will publish"
+          fi
+
+      - name: Publish to npm (dry run)
+        if: steps.check.outputs.already_published == 'false'
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          echo "🏜️ DRY RUN — would publish sparkid@$NEW_VERSION to npm:"
+          echo "  npm publish --access public"
+
+  # ── Publish to PyPI (parallel) ─────────────────────────────────
+  publish-pypi:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if version already published to PyPI
+        id: check
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          http_code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/sparkid/$NEW_VERSION/json")
+          if [ "$http_code" = "200" ]; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "⏭️ sparkid $NEW_VERSION already exists on PyPI — skipping publish"
+            echo "### ⏭️ PyPI: already published" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "📦 sparkid $NEW_VERSION not found on PyPI (HTTP $http_code) — will publish"
+          fi
+
+      - name: Publish to PyPI (dry run)
+        if: steps.check.outputs.already_published == 'false'
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          echo "🏜️ DRY RUN — would publish sparkid $NEW_VERSION to PyPI:"
+          echo "  uv publish"
+
+  # ── Publish to crates.io (parallel) ────────────────────────────
+  publish-crates:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if version already published to crates.io
+        id: check
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          # Query crates.io API for this specific version
+          version_exists=$(curl -s "https://crates.io/api/v1/crates/sparkid/$NEW_VERSION" \
+            | jq -r '.version.num // empty')
+          if [ "$version_exists" = "$NEW_VERSION" ]; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "⏭️ sparkid $NEW_VERSION already exists on crates.io — skipping publish"
+            echo "### ⏭️ crates.io: already published" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "📦 sparkid $NEW_VERSION not found on crates.io — will publish"
+          fi
+
+      - name: Publish to crates.io (dry run)
+        if: steps.check.outputs.already_published == 'false'
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          echo "🏜️ DRY RUN — would publish sparkid $NEW_VERSION to crates.io:"
+          echo "  cargo publish"
+
+  # ── Create GitHub Release (after all publishes succeed) ────────
+  create-release:
+    needs: [publish-npm, publish-pypi, publish-crates, prepare]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check if release already exists
+        id: check
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v$NEW_VERSION" &>/dev/null; then
+            echo "already_exists=true" >> "$GITHUB_OUTPUT"
+            echo "⏭️ Release v$NEW_VERSION already exists — skipping creation"
+            echo "### ⏭️ GitHub Release: already exists" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already_exists=false" >> "$GITHUB_OUTPUT"
+            echo "📦 Release v$NEW_VERSION does not exist — will create"
+          fi
+
+      - name: Create GitHub Release (dry run)
+        if: steps.check.outputs.already_exists == 'false'
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
         run: |
           echo "🏜️ DRY RUN — would create GitHub Release:"
           echo "  gh release create v$NEW_VERSION \\"
           echo "    --title \"v$NEW_VERSION\" \\"
           echo "    --generate-notes"
-
-      # ── Publish: npm (dry run) ─────────────────────────────────
-      - name: Publish to npm (dry run)
-        run: |
-          echo "🏜️ DRY RUN — would publish to npm:"
-          echo "  npm publish --access public"
-          npm pack --dry-run
-        working-directory: js
-
-      # ── Publish: PyPI (dry run) ────────────────────────────────
-      - name: Publish to PyPI (dry run)
-        run: |
-          echo "🏜️ DRY RUN — would publish to PyPI:"
-          echo "  uv publish"
-          echo ""
-          echo "Built artifacts:"
-          ls -la dist/
-        working-directory: python
-
-      # ── Publish: crates.io (dry run) ───────────────────────────
-      - name: Publish to crates.io (dry run)
-        run: |
-          echo "🏜️ DRY RUN — would publish to crates.io:"
-          # --allow-dirty needed because version was stamped but not committed
-          # TODO: remove --allow-dirty when commit step is live
-          cargo publish --dry-run --allow-dirty 2>&1
-        working-directory: rust
