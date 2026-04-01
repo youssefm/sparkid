@@ -26,34 +26,51 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha=$(git rev-parse HEAD)
-          echo "Checking CI status for $sha ..."
+          echo "Checking CI check-runs for $sha ..."
 
-          for i in $(seq 1 10); do
-            result=$(gh api "repos/${{ github.repository }}/commits/${sha}/status" --jq '.state')
-            echo "  Attempt $i/10: status = $result"
+          for i in $(seq 1 30); do
+            # Get all check runs for this commit from the Test workflow
+            checks=$(gh api "repos/${{ github.repository }}/commits/${sha}/check-runs" \
+              --jq '[.check_runs[] | select(.app.slug == "github-actions" and .name != "ci-check") | {name, status, conclusion}]')
 
-            case "$result" in
-              success)
-                echo "✅ CI passed"
-                exit 0
-                ;;
-              failure|error)
-                echo "::error::CI failed for this commit (status: $result)"
+            total=$(echo "$checks" | jq 'length')
+            echo "  Attempt $i/30: found $total check(s)"
+            echo "$checks" | jq -r '.[] | "    \(.name): status=\(.status) conclusion=\(.conclusion)"'
+
+            # No checks found yet — CI may not have started
+            if [ "$total" -eq 0 ]; then
+              if [ "$i" -eq 30 ]; then
+                echo "::error::No CI checks found after 5 minutes"
                 exit 1
-                ;;
-              pending)
-                if [ "$i" -eq 10 ]; then
-                  echo "::error::CI still pending after 5 minutes — aborting"
-                  exit 1
-                fi
-                echo "  CI still running, waiting 30s ..."
-                sleep 30
-                ;;
-              *)
-                echo "::error::No CI status found for this commit (got: $result)"
-                exit 1
-                ;;
-            esac
+              fi
+              echo "  No checks found yet, waiting 10s ..."
+              sleep 10
+              continue
+            fi
+
+            # Check if any failed
+            failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled")] | length')
+            if [ "$failed" -gt 0 ]; then
+              echo "::error::CI has failing checks"
+              exit 1
+            fi
+
+            # Check if all completed successfully
+            completed=$(echo "$checks" | jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length')
+            if [ "$completed" -eq "$total" ]; then
+              echo "✅ All $total checks passed"
+              exit 0
+            fi
+
+            # Some still in progress
+            in_progress=$((total - completed))
+            echo "  $in_progress check(s) still running ..."
+
+            if [ "$i" -eq 30 ]; then
+              echo "::error::CI still running after 5 minutes — aborting"
+              exit 1
+            fi
+            sleep 10
           done
 
   release:
