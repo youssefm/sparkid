@@ -14,6 +14,8 @@ on:
 
 permissions:
   contents: write
+  checks: read
+  actions: read
 
 jobs:
   # Gate: verify CI has already passed for this commit (wait up to 5 min if in progress)
@@ -26,51 +28,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           sha=$(git rev-parse HEAD)
-          echo "Checking CI check-runs for $sha ..."
+          echo "Checking Test workflow status for $sha ..."
 
           for i in $(seq 1 30); do
-            # Get all check runs for this commit from the Test workflow
-            checks=$(gh api "repos/${{ github.repository }}/commits/${sha}/check-runs" \
-              --jq '[.check_runs[] | select(.app.slug == "github-actions" and .name != "ci-check") | {name, status, conclusion}]')
+            # Query only the Test workflow's runs for this commit
+            run_status=$(gh api "repos/${{ github.repository }}/actions/workflows/test.yml/runs?head_sha=${sha}&per_page=1" \
+              --jq '.workflow_runs[0] // empty | {status, conclusion}')
 
-            total=$(echo "$checks" | jq 'length')
-            echo "  Attempt $i/30: found $total check(s)"
-            echo "$checks" | jq -r '.[] | "    \(.name): status=\(.status) conclusion=\(.conclusion)"'
-
-            # No checks found yet — CI may not have started
-            if [ "$total" -eq 0 ]; then
+            if [ -z "$run_status" ]; then
               if [ "$i" -eq 30 ]; then
-                echo "::error::No CI checks found after 5 minutes"
+                echo "::error::No Test workflow run found for $sha after 5 minutes"
                 exit 1
               fi
-              echo "  No checks found yet, waiting 10s ..."
+              echo "  Attempt $i/30: no run found yet, waiting 10s ..."
               sleep 10
               continue
             fi
 
-            # Check if any failed
-            failed=$(echo "$checks" | jq '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled")] | length')
-            if [ "$failed" -gt 0 ]; then
-              echo "::error::CI has failing checks"
-              exit 1
+            status=$(echo "$run_status" | jq -r '.status')
+            conclusion=$(echo "$run_status" | jq -r '.conclusion')
+            echo "  Attempt $i/30: status=$status conclusion=$conclusion"
+
+            if [ "$status" != "completed" ]; then
+              if [ "$i" -eq 30 ]; then
+                echo "::error::Test workflow still running after 5 minutes — aborting"
+                exit 1
+              fi
+              echo "  Still running, waiting 10s ..."
+              sleep 10
+              continue
             fi
 
-            # Check if all completed successfully
-            completed=$(echo "$checks" | jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length')
-            if [ "$completed" -eq "$total" ]; then
-              echo "✅ All $total checks passed"
+            if [ "$conclusion" = "success" ]; then
+              echo "✅ Test workflow passed"
               exit 0
-            fi
-
-            # Some still in progress
-            in_progress=$((total - completed))
-            echo "  $in_progress check(s) still running ..."
-
-            if [ "$i" -eq 30 ]; then
-              echo "::error::CI still running after 5 minutes — aborting"
+            else
+              echo "::error::Test workflow finished with conclusion: $conclusion"
               exit 1
             fi
-            sleep 10
           done
 
   release:
@@ -85,11 +80,13 @@ jobs:
       # ── Calculate new version ──────────────────────────────────
       - name: Calculate version
         id: version
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
-          current=$(grep '"version"' js/package.json | head -1 | sed 's/.*"\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/')
+          current=$(grep '"version"' js/package.json | head -1 | sed 's/.*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/')
           IFS='.' read -r major minor patch <<< "$current"
 
-          case "${{ inputs.bump }}" in
+          case "$BUMP" in
             major) major=$((major + 1)); minor=0; patch=0 ;;
             minor) minor=$((minor + 1)); patch=0 ;;
             patch) patch=$((patch + 1)) ;;
@@ -98,21 +95,27 @@ jobs:
           new="${major}.${minor}.${patch}"
           echo "current=$current" >> "$GITHUB_OUTPUT"
           echo "new=$new" >> "$GITHUB_OUTPUT"
-          echo "### Version bump: $current → $new (${{ inputs.bump }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Version bump: $current → $new ($BUMP)" >> "$GITHUB_STEP_SUMMARY"
 
       # ── Stamp version into all package manifests ───────────────
       - name: Stamp version in package.json
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
         run: |
-          sed -i 's/"version": ".*"/"version": "${{ steps.version.outputs.new }}"/' js/package.json
+          sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" js/package.json
 
       - name: Stamp version in pyproject.toml
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
         run: |
-          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.new }}"/' python/pyproject.toml
+          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" python/pyproject.toml
 
       - name: Stamp version in Cargo.toml
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
         run: |
           # Only replace the version under [package], not under [dependencies]
-          sed -i '0,/^version = ".*"/s//version = "${{ steps.version.outputs.new }}"/' rust/Cargo.toml
+          sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" rust/Cargo.toml
 
       # ── Rebuild everything to verify ───────────────────────────
       - uses: actions/setup-node@v4
@@ -136,22 +139,26 @@ jobs:
 
       # ── Commit, tag, push (dry run) ────────────────────────────
       - name: Commit, tag, push (dry run)
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
         run: |
           echo "🏜️ DRY RUN — would commit, tag, and push:"
-          echo "  git commit -m \"chore: bump version to ${{ steps.version.outputs.new }}\""
-          echo "  git tag v${{ steps.version.outputs.new }}"
+          echo "  git commit -m \"chore: bump version to $NEW_VERSION\""
+          echo "  git tag v$NEW_VERSION"
           echo "  git push origin main"
-          echo "  git push origin v${{ steps.version.outputs.new }}"
+          echo "  git push origin v$NEW_VERSION"
           echo ""
           echo "Stamped files:"
           git diff --name-only
 
       # ── GitHub Release (dry run) ───────────────────────────────
       - name: Create GitHub Release (dry run)
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new }}
         run: |
           echo "🏜️ DRY RUN — would create GitHub Release:"
-          echo "  gh release create v${{ steps.version.outputs.new }} \\"
-          echo "    --title \"v${{ steps.version.outputs.new }}\" \\"
+          echo "  gh release create v$NEW_VERSION \\"
+          echo "    --title \"v$NEW_VERSION\" \\"
           echo "    --generate-notes"
 
       # ── Publish: npm (dry run) ─────────────────────────────────
@@ -176,5 +183,7 @@ jobs:
       - name: Publish to crates.io (dry run)
         run: |
           echo "🏜️ DRY RUN — would publish to crates.io:"
-          cargo publish --dry-run 2>&1
+          # --allow-dirty needed because version was stamped but not committed
+          # TODO: remove --allow-dirty when commit step is live
+          cargo publish --dry-run --allow-dirty 2>&1
         working-directory: rust
