@@ -22,7 +22,7 @@ jobs:
   ci-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Verify CI passed for this commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -72,7 +72,7 @@ jobs:
     needs: ci-check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           # Fetch full history so we can read current version from tags/files
           fetch-depth: 0
@@ -118,7 +118,7 @@ jobs:
           sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" rust/Cargo.toml
 
       # ── Rebuild everything to verify ───────────────────────────
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       - run: npm ci
@@ -126,8 +126,8 @@ jobs:
       - run: npm run build
         working-directory: js
 
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
       - run: uv build
