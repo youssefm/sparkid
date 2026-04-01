@@ -1,4 +1,4 @@
-# sparkid
+# ⚡ sparkid
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Test](https://github.com/youssefm/sparkid/actions/workflows/test.yml/badge.svg)](https://github.com/youssefm/sparkid/actions/workflows/test.yml)

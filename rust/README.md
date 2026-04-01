@@ -1,4 +1,4 @@
-# sparkid
+# ⚡ sparkid
 
 Fast, monotonic, time-sortable, 21-char Base58 unique ID generator. Only dependency is `rand`.
 
