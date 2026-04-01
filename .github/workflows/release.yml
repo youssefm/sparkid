@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  # Gate: verify CI has already passed for this commit (wait up to 5 min if in progress)
+  ci-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify CI passed for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=$(git rev-parse HEAD)
+          echo "Checking CI status for $sha ..."
+
+          for i in $(seq 1 10); do
+            result=$(gh api "repos/${{ github.repository }}/commits/${sha}/status" --jq '.state')
+            echo "  Attempt $i/10: status = $result"
+
+            case "$result" in
+              success)
+                echo "✅ CI passed"
+                exit 0
+                ;;
+              failure|error)
+                echo "::error::CI failed for this commit (status: $result)"
+                exit 1
+                ;;
+              pending)
+                if [ "$i" -eq 10 ]; then
+                  echo "::error::CI still pending after 5 minutes — aborting"
+                  exit 1
+                fi
+                echo "  CI still running, waiting 30s ..."
+                sleep 30
+                ;;
+              *)
+                echo "::error::No CI status found for this commit (got: $result)"
+                exit 1
+                ;;
+            esac
+          done
+
+  release:
+    needs: ci-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch full history so we can read current version from tags/files
+          fetch-depth: 0
+
+      # ── Calculate new version ──────────────────────────────────
+      - name: Calculate version
+        id: version
+        run: |
+          current=$(grep '"version"' js/package.json | head -1 | sed 's/.*"\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/')
+          IFS='.' read -r major minor patch <<< "$current"
+
+          case "${{ inputs.bump }}" in
+            major) major=$((major + 1)); minor=0; patch=0 ;;
+            minor) minor=$((minor + 1)); patch=0 ;;
+            patch) patch=$((patch + 1)) ;;
+          esac
+
+          new="${major}.${minor}.${patch}"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "### Version bump: $current → $new (${{ inputs.bump }})" >> "$GITHUB_STEP_SUMMARY"
+
+      # ── Stamp version into all package manifests ───────────────
+      - name: Stamp version in package.json
+        run: |
+          sed -i 's/"version": ".*"/"version": "${{ steps.version.outputs.new }}"/' js/package.json
+
+      - name: Stamp version in pyproject.toml
+        run: |
+          sed -i 's/^version = ".*"/version = "${{ steps.version.outputs.new }}"/' python/pyproject.toml
+
+      - name: Stamp version in Cargo.toml
+        run: |
+          # Only replace the version under [package], not under [dependencies]
+          sed -i '0,/^version = ".*"/s//version = "${{ steps.version.outputs.new }}"/' rust/Cargo.toml
+
+      # ── Rebuild everything to verify ───────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+        working-directory: js
+      - run: npm run build
+        working-directory: js
+
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: uv build
+        working-directory: python
+
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+        working-directory: rust
+
+      # ── Commit, tag, push (dry run) ────────────────────────────
+      - name: Commit, tag, push (dry run)
+        run: |
+          echo "🏜️ DRY RUN — would commit, tag, and push:"
+          echo "  git commit -m \"chore: bump version to ${{ steps.version.outputs.new }}\""
+          echo "  git tag v${{ steps.version.outputs.new }}"
+          echo "  git push origin main"
+          echo "  git push origin v${{ steps.version.outputs.new }}"
+          echo ""
+          echo "Stamped files:"
+          git diff --name-only
+
+      # ── GitHub Release (dry run) ───────────────────────────────
+      - name: Create GitHub Release (dry run)
+        run: |
+          echo "🏜️ DRY RUN — would create GitHub Release:"
+          echo "  gh release create v${{ steps.version.outputs.new }} \\"
+          echo "    --title \"v${{ steps.version.outputs.new }}\" \\"
+          echo "    --generate-notes"
+
+      # ── Publish: npm (dry run) ─────────────────────────────────
+      - name: Publish to npm (dry run)
+        run: |
+          echo "🏜️ DRY RUN — would publish to npm:"
+          echo "  npm publish --access public"
+          npm pack --dry-run
+        working-directory: js
+
+      # ── Publish: PyPI (dry run) ────────────────────────────────
+      - name: Publish to PyPI (dry run)
+        run: |
+          echo "🏜️ DRY RUN — would publish to PyPI:"
+          echo "  uv publish"
+          echo ""
+          echo "Built artifacts:"
+          ls -la dist/
+        working-directory: python
+
+      # ── Publish: crates.io (dry run) ───────────────────────────
+      - name: Publish to crates.io (dry run)
+        run: |
+          echo "🏜️ DRY RUN — would publish to crates.io:"
+          cargo publish --dry-run 2>&1
+        working-directory: rust
