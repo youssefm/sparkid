@@ -23,6 +23,17 @@ id = generate_id()
 # => "1ocmpHE1bFnygEBAPTzMK"
 ```
 
+### Extract timestamp
+
+```python
+from sparkid import extract_timestamp
+
+id = generate_id()
+dt = extract_timestamp(id)
+print(dt.isoformat())
+# => "2025-11-14T22:13:20+00:00"
+```
+
 ## Properties
 
 | Property | Value |

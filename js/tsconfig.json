@@ -5,6 +5,8 @@
     "moduleResolution": "node",
     "declaration": true,
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "esModuleInterop": true,
     "outDir": "dist",
     "rootDir": "src",

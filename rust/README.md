@@ -27,6 +27,20 @@ let s: &str = &id;             // Deref to &str, zero-cost
 let owned: String = id.into(); // Into<String> when needed
 ```
 
+### Extract timestamp
+
+```rust
+use sparkid::SparkId;
+
+let id = SparkId::new();
+
+// As milliseconds since epoch (available in no_std)
+let ms = id.timestamp_ms();
+
+// As SystemTime (requires std)
+let ts = id.timestamp();
+```
+
 ## Properties
 
 | Property | Value |

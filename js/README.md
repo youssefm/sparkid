@@ -23,6 +23,17 @@ const id = generateId();
 // => "1ocmpHE1bFnygEBAPTzMK"
 ```
 
+### Extract timestamp
+
+```typescript
+import { extractTimestamp } from "sparkid";
+
+const id = generateId();
+const date = extractTimestamp(id);
+console.log(date.toISOString());
+// => "2025-11-14T22:13:20.000Z"
+```
+
 ## Properties
 
 | Property | Value |
