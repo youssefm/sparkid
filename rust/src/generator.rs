@@ -445,8 +445,9 @@ impl IdGenerator {
     ///
     /// Called when the counter tail overflows. Walks backward through
     /// the counter head (positions 12 down to 8). On full overflow
-    /// (all 6 counter chars at max — practically impossible at ~38 billion
-    /// increments per ms), bumps the timestamp forward by 1ms and reseeds.
+    /// (all 6 counter chars maxed), bumps the timestamp forward by 1ms
+    /// and reseeds. Because the counter is randomly seeded each ms,
+    /// overflow probability is n / 58^6 for n IDs generated in that ms.
     fn increment_carry(&mut self) {
         for i in (8..=12).rev() {
             let next = SUCCESSOR[self.id_buffer[i] as usize];

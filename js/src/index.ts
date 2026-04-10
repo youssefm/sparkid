@@ -143,8 +143,9 @@ function seedCounter(): void {
  * Called when the counter tail char overflows. Walks backward through
  * the counter head chars (positions 4 down to 0, stored at indices 12
  * down to 8 in prefixPlusCounterHead). On full overflow (all 6 counter
- * chars at max — practically impossible at ~38 billion increments per
- * ms), bumps the timestamp forward by 1 ms and reseeds.
+ * chars maxed), bumps the timestamp forward by 1 ms and reseeds.
+ * Because the counter is randomly seeded each ms, overflow probability
+ * is n / 58^6 for n IDs generated in that ms.
  */
 function incrementCarry(): void {
   const pph = prefixPlusCounterHead;

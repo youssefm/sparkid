@@ -60,9 +60,10 @@ class IdGenerator:
     IDs are strictly monotonically increasing within a single generator instance:
     across milliseconds by the timestamp prefix, and within the same millisecond
     by incrementing the counter (seeded from os.urandom at the start of each new
-    millisecond). On the practically-impossible counter overflow (~58^6 ≈ 38
-    billion increments within 1ms), the timestamp is bumped forward and the
-    counter is reseeded.
+    millisecond). On counter overflow the timestamp is bumped forward and the
+    counter is reseeded. Because the counter is randomly seeded (not starting
+    at zero), the probability of overflow when generating n IDs in one
+    millisecond is n / 58^6 (≈ n / 38 billion).
 
     The random tail is freshly generated for every ID, making individual IDs
     unpredictable even when the counter value can be inferred.
@@ -166,8 +167,9 @@ class IdGenerator:
         """Handle carry propagation through counter head bytes.
 
         Called when the counter tail overflows. On full overflow
-        (all 6 counter chars at max — practically impossible at ~38 billion
-        increments per ms), bump the timestamp forward by 1ms and reseed.
+        (all 6 counter chars maxed), bump the timestamp forward by 1ms and
+        reseed. Because the counter is randomly seeded each ms, overflow
+        probability is n / 58^6 for n IDs generated in that ms.
         """
         buf = self._counter_head_buf
         successor = _SUCCESSOR
