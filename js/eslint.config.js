@@ -13,7 +13,7 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist/", "bench/", "eslint.config.js"],
+    ignores: ["dist/", "bench/", "eslint.config.js", "tsup.config.ts"],
   },
   {
     rules: {

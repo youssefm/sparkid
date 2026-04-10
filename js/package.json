@@ -18,6 +18,8 @@
   "scripts": {
     "build": "tsup",
     "test": "tsx --test tests/test_sparkid.ts",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
     "bench": "tsx bench/benchmark.ts",
     "bench:compare": "tsx bench/benchmark.ts --compare"
   },

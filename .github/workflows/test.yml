@@ -21,6 +21,8 @@ jobs:
         working-directory: js
       - run: npx tsc --noEmit
         working-directory: js
+      - run: npm run lint
+        working-directory: js
       - run: npm test
         working-directory: js
       - run: npm run build
