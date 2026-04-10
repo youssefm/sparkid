@@ -12,6 +12,14 @@ const ID_LENGTH = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT + RANDOM_CHAR_COUNT;
 // ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
 const RANDOM_BATCH_SIZE = 16384;
 
+// Derived layout constants
+const COUNTER_HEAD_CHAR_COUNT = COUNTER_CHAR_COUNT - 1; // 5
+const COUNTER_HEAD_LAST_INDEX =
+  TIMESTAMP_CHAR_COUNT + COUNTER_HEAD_CHAR_COUNT - 1; // 12
+const PREFIX_COUNTER_HEAD_LENGTH =
+  TIMESTAMP_CHAR_COUNT + COUNTER_HEAD_CHAR_COUNT; // 13
+const SUCCESSOR_TABLE_SIZE = ALPHABET.charCodeAt(BASE - 1) + 1; // 123
+
 // Timestamp encoding: remainder (0-57) -> single char
 const TIMESTAMP_LOOKUP: string[] = Array.from(
   { length: BASE },
@@ -29,21 +37,21 @@ for (let byte = 0; byte < 256; byte++) {
 
 // Successor table: charCode -> next Base58 char code, or 0 if carry needed.
 // Using char codes avoids string allocation on the hot path.
-const SUCCESSOR_CC: Uint8Array = new Uint8Array(123); // charCode('z') + 1
+const SUCCESSOR_CC: Uint8Array = new Uint8Array(SUCCESSOR_TABLE_SIZE);
 for (let i = 0; i < BASE - 1; i++) {
   SUCCESSOR_CC[ALPHABET.charCodeAt(i)] = ALPHABET.charCodeAt(i + 1);
 }
 // Last char ('z') stays 0 (carry)
 
 // Successor table (string version) for carry propagation
-const SUCCESSOR: string[] = new Array(123).fill("");
+const SUCCESSOR: string[] = new Array(SUCCESSOR_TABLE_SIZE).fill("");
 for (let i = 0; i < BASE - 1; i++) {
   SUCCESSOR[ALPHABET.charCodeAt(i)] = ALPHABET[i + 1];
 }
 
 // Reverse lookup: charCode -> Base58 index (0-57), or -1 if invalid.
 // Used for timestamp decoding in extractTimestamp.
-const BASE58_INDEX: Int8Array = new Int8Array(123).fill(-1);
+const BASE58_INDEX: Int8Array = new Int8Array(SUCCESSOR_TABLE_SIZE).fill(-1);
 for (let i = 0; i < BASE; i++) {
   BASE58_INDEX[ALPHABET.charCodeAt(i)] = i;
 }
@@ -161,11 +169,13 @@ function seedCounter(): void {
  */
 function incrementCarry(): void {
   const pph = prefixPlusCounterHead;
-  for (let i = 12; i >= 8; i--) {
+  for (let i = COUNTER_HEAD_LAST_INDEX; i >= TIMESTAMP_CHAR_COUNT; i--) {
     const next = SUCCESSOR[pph.charCodeAt(i)];
     if (next) {
       prefixPlusCounterHead =
-        pph.substring(0, i) + next + FIRST_CHAR.repeat(12 - i);
+        pph.substring(0, i) +
+        next +
+        FIRST_CHAR.repeat(COUNTER_HEAD_LAST_INDEX - i);
       counterTailCharCode = FIRST_CHAR_CODE;
       return;
     }

@@ -15,7 +15,8 @@ use rand::{RngCore, SeedableRng};
 
 // Base58 alphabet — excludes visually ambiguous characters (0, O, I, l)
 const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-const BASE: u64 = 58;
+const BASE: u64 = ALPHABET.len() as u64;
+const BASE_USIZE: usize = ALPHABET.len();
 
 // ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
 const TIMESTAMP_CHAR_COUNT: usize = 8;
@@ -29,11 +30,17 @@ const RANDOM_BATCH_SIZE: usize = 16384;
 
 const FIRST_BYTE: u8 = ALPHABET[0]; // b'1'
 
+// Derived layout constants
+const COUNTER_HEAD_CHAR_COUNT: usize = COUNTER_CHAR_COUNT - 1;
+const COUNTER_TAIL_OFFSET: usize = TIMESTAMP_CHAR_COUNT + COUNTER_HEAD_CHAR_COUNT;
+const RANDOM_START_OFFSET: usize = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT;
+const SUCCESSOR_TABLE_SIZE: usize = ALPHABET[BASE_USIZE - 1] as usize + 1; // b'z' + 1
+
 // Timestamp encoding: remainder (0-57) -> single byte
-const TIMESTAMP_LOOKUP: [u8; 58] = {
-    let mut table = [0u8; 58];
+const TIMESTAMP_LOOKUP: [u8; BASE_USIZE] = {
+    let mut table = [0u8; BASE_USIZE];
     let mut i = 0;
-    while i < 58 {
+    while i < BASE_USIZE {
         table[i] = ALPHABET[i];
         i += 1;
     }
@@ -48,7 +55,7 @@ const RANDOM_BYTE_LOOKUP: [u8; 256] = {
     let mut byte = 0;
     while byte < 256 {
         let value = byte & 0x3f;
-        if value < 58 {
+        if value < BASE_USIZE {
             table[byte] = ALPHABET[value];
         }
         // else stays 0 (rejected)
@@ -58,10 +65,10 @@ const RANDOM_BYTE_LOOKUP: [u8; 256] = {
 };
 
 // Successor table: byte -> next Base58 byte, or 0 if carry needed.
-const SUCCESSOR: [u8; 123] = {
-    let mut table = [0u8; 123]; // b'z' + 1
+const SUCCESSOR: [u8; SUCCESSOR_TABLE_SIZE] = {
+    let mut table = [0u8; SUCCESSOR_TABLE_SIZE]; // b'z' + 1
     let mut i = 0;
-    while i < 57 {
+    while i < BASE_USIZE - 1 {
         table[ALPHABET[i] as usize] = ALPHABET[i + 1];
         i += 1;
     }
@@ -73,7 +80,7 @@ const SUCCESSOR: [u8; 123] = {
 const IS_BASE58: [bool; 256] = {
     let mut table = [false; 256];
     let mut i = 0;
-    while i < 58 {
+    while i < BASE_USIZE {
         table[ALPHABET[i] as usize] = true;
         i += 1;
     }
@@ -84,7 +91,7 @@ const IS_BASE58: [bool; 256] = {
 const BASE58_INDEX: [u8; 256] = {
     let mut table = [255u8; 256];
     let mut i: usize = 0;
-    while i < 58 {
+    while i < BASE_USIZE {
         table[ALPHABET[i] as usize] = i as u8;
         i += 1;
     }
@@ -180,7 +187,7 @@ impl SparkId {
     pub fn timestamp_ms(&self) -> u64 {
         let mut val: u64 = 0;
         for &b in &self.0[..TIMESTAMP_CHAR_COUNT] {
-            val = val * 58 + BASE58_INDEX[b as usize] as u64;
+            val = val * BASE + BASE58_INDEX[b as usize] as u64;
         }
         val
     }
@@ -406,8 +413,8 @@ impl IdGenerator {
 
         // Hot path: only write counter tail (1 byte) + random (7 bytes).
         // The prefix (8) and counter head (5) are already up to date in id_buffer.
-        self.id_buffer[13] = self.counter_tail;
-        self.id_buffer[14..21].copy_from_slice(&self.random_buffer[position..position + RANDOM_CHAR_COUNT]);
+        self.id_buffer[COUNTER_TAIL_OFFSET] = self.counter_tail;
+        self.id_buffer[RANDOM_START_OFFSET..ID_LENGTH].copy_from_slice(&self.random_buffer[position..position + RANDOM_CHAR_COUNT]);
     }
 
     #[cfg(feature = "std")]
@@ -472,9 +479,9 @@ impl IdGenerator {
         let position = self.random_position;
         self.random_position = position + COUNTER_CHAR_COUNT;
 
-        self.id_buffer[8..13]
-            .copy_from_slice(&self.random_buffer[position..position + 5]);
-        self.counter_tail = self.random_buffer[position + 5];
+        self.id_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET]
+            .copy_from_slice(&self.random_buffer[position..position + COUNTER_HEAD_CHAR_COUNT]);
+        self.counter_tail = self.random_buffer[position + COUNTER_HEAD_CHAR_COUNT];
     }
 
     /// Handle carry propagation through the counter head bytes.
@@ -485,11 +492,11 @@ impl IdGenerator {
     /// and reseeds. Because the counter is randomly seeded each ms,
     /// overflow probability is n / 58^6 for n IDs generated in that ms.
     fn increment_carry(&mut self) {
-        for i in (8..=12).rev() {
+        for i in (TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET).rev() {
             let next = SUCCESSOR[self.id_buffer[i] as usize];
             if next != 0 {
                 self.id_buffer[i] = next;
-                for j in (i + 1)..=12 {
+                for j in (i + 1)..COUNTER_TAIL_OFFSET {
                     self.id_buffer[j] = FIRST_BYTE;
                 }
                 self.counter_tail = FIRST_BYTE;
@@ -518,7 +525,7 @@ impl IdGenerator {
 
     /// Read the prefix+counter_head buffer (first 13 bytes of id_buffer).
     pub fn prefix_plus_counter_head(&self) -> &[u8; 13] {
-        self.id_buffer[..13].try_into().unwrap()
+        self.id_buffer[..COUNTER_TAIL_OFFSET].try_into().unwrap()
     }
 
     /// Read the counter tail byte.
@@ -538,7 +545,7 @@ impl IdGenerator {
 
     /// Set the counter head bytes directly.
     pub fn set_counter_head(&mut self, bytes: &[u8; 5]) {
-        self.id_buffer[8..13].copy_from_slice(bytes);
+        self.id_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET].copy_from_slice(bytes);
     }
 
     /// Set the counter tail byte directly.

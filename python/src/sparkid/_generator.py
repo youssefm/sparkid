@@ -14,6 +14,10 @@ _COUNTER_CHAR_COUNT = 6
 _RANDOM_CHAR_COUNT = 7
 _ID_LENGTH = _TIMESTAMP_CHAR_COUNT + _COUNTER_CHAR_COUNT + _RANDOM_CHAR_COUNT
 
+_COUNTER_HEAD_CHAR_COUNT = _COUNTER_CHAR_COUNT - 1  # 5
+_COUNTER_HEAD_LAST_INDEX = _COUNTER_HEAD_CHAR_COUNT - 1  # 4
+_PREFIX_COUNTER_HEAD_LENGTH = _TIMESTAMP_CHAR_COUNT + _COUNTER_HEAD_CHAR_COUNT  # 13
+
 # How many random bytes to fetch per batch. After rejection sampling,
 # ~90.6% survive (58/64), yielding ~232 valid chars.
 _RANDOM_BATCH_SIZE = 256
@@ -29,16 +33,19 @@ _TRANSLATE_TABLE = bytes(
 )
 _DELETE_BYTES = bytes(b for b in range(256) if (b & 0x3F) >= BASE)
 
+# Successor table size: covers all char codes up to last alphabet character.
+_SUCCESSOR_TABLE_SIZE = ord(ALPHABET[-1]) + 1  # ord('z') + 1
+
 # Successor table: char code -> next Base58 char (string), or "" if carry needed.
-_SUCCESSOR_STR: list[str] = [""] * 123  # ord('z') + 1
-for _i in range(len(ALPHABET) - 1):
+_SUCCESSOR_STR: list[str] = [""] * _SUCCESSOR_TABLE_SIZE
+for _i in range(BASE - 1):
     _SUCCESSOR_STR[ord(ALPHABET[_i])] = ALPHABET[_i + 1]
 # Last char ('z') stays "" (carry)
 
 # Successor table: byte -> next Base58 byte, or -1 if carry needed.
 # Used in carry propagation which still operates on the bytearray.
-_SUCCESSOR = [-1] * 123
-for _i in range(len(ALPHABET) - 1):
+_SUCCESSOR = [-1] * _SUCCESSOR_TABLE_SIZE
+for _i in range(BASE - 1):
     _SUCCESSOR[ord(ALPHABET[_i])] = ord(ALPHABET[_i + 1])
 
 # Reverse lookup: char -> Base58 index (0-57). Used for timestamp decoding.
@@ -113,10 +120,10 @@ class IdGenerator:
     def _reset_state(self) -> None:
         """(Re)initialize all mutable state. Called on construction and after fork."""
         self._timestamp_cache_ms = 0
-        self._prefix_plus_counter_head = _FIRST_CHAR * 13
+        self._prefix_plus_counter_head = _FIRST_CHAR * _PREFIX_COUNTER_HEAD_LENGTH
         self._counter_tail = _FIRST_CHAR
-        # Bytearray for carry propagation (counter head, 5 bytes)
-        self._counter_head_buf = bytearray(b"1" * 5)
+        # Bytearray for carry propagation (counter head)
+        self._counter_head_buf = bytearray([_FIRST_BYTE] * _COUNTER_HEAD_CHAR_COUNT)
         self._random_char_buffer = ""
         self._random_byte_buffer = b""
         self._random_byte_position = 0
@@ -163,11 +170,11 @@ class IdGenerator:
             end = _COUNTER_CHAR_COUNT
         self._random_byte_position = end
         counter_bytes = self._random_byte_buffer[position:end]
-        self._counter_head_buf[:] = counter_bytes[:5]
+        self._counter_head_buf[:] = counter_bytes[:_COUNTER_HEAD_CHAR_COUNT]
         self._prefix_plus_counter_head = self._prefix_plus_counter_head[
-            :8
-        ] + counter_bytes[:5].decode("ascii")
-        self._counter_tail = chr(counter_bytes[5])
+            :_TIMESTAMP_CHAR_COUNT
+        ] + counter_bytes[:_COUNTER_HEAD_CHAR_COUNT].decode("ascii")
+        self._counter_tail = chr(counter_bytes[_COUNTER_HEAD_CHAR_COUNT])
 
     def _increment_counter_carry(self) -> None:
         """Handle carry propagation through counter head bytes.
@@ -179,15 +186,15 @@ class IdGenerator:
         """
         buf = self._counter_head_buf
         successor = _SUCCESSOR
-        for i in range(4, -1, -1):
+        for i in range(_COUNTER_HEAD_LAST_INDEX, -1, -1):
             nxt = successor[buf[i]]
             if nxt >= 0:
                 buf[i] = nxt
-                for j in range(i + 1, 5):
+                for j in range(i + 1, _COUNTER_HEAD_CHAR_COUNT):
                     buf[j] = _FIRST_BYTE
                 self._counter_tail = _FIRST_CHAR
                 self._prefix_plus_counter_head = self._prefix_plus_counter_head[
-                    :8
+                    :_TIMESTAMP_CHAR_COUNT
                 ] + buf.decode("ascii")
                 return
         # Overflow: bump timestamp, reseed.
@@ -216,7 +223,9 @@ class IdGenerator:
             + lookup[r7]
         )
         # Update the prefix, preserving the counter head portion.
-        self._prefix_plus_counter_head = ts_prefix + self._prefix_plus_counter_head[8:]
+        self._prefix_plus_counter_head = (
+            ts_prefix + self._prefix_plus_counter_head[_TIMESTAMP_CHAR_COUNT:]
+        )
 
     def _refill_random(self) -> None:
         """Fetch a batch of random bytes, rejection-sample to Base58 chars."""
