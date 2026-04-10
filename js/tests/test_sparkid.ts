@@ -150,7 +150,10 @@ describe("Counter monotonicity", () => {
     for (const id of ids) {
       const ts = id.slice(0, 8);
       let arr = groups.get(ts);
-      if (!arr) { arr = []; groups.set(ts, arr); }
+      if (!arr) {
+        arr = [];
+        groups.set(ts, arr);
+      }
       arr.push(id);
     }
     let sameTs: string[] = [];
