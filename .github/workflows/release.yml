@@ -140,7 +140,7 @@ jobs:
         working-directory: rust
 
       # ── Commit, tag, push (skip if tag already exists) ─────────
-      - name: Commit, tag, push (dry run)
+      - name: Commit, tag, push
         env:
           NEW_VERSION: ${{ steps.version.outputs.new }}
           GH_TOKEN: ${{ github.token }}
@@ -150,14 +150,14 @@ jobs:
             echo "⏭️ Tag v$NEW_VERSION already exists on remote — skipping commit/tag/push"
             echo "### ⏭️ Tag already exists — skipped commit/tag/push" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "🏜️ DRY RUN — would commit, tag, and push:"
-            echo "  git commit -m \"chore: bump version to $NEW_VERSION\""
-            echo "  git tag v$NEW_VERSION"
-            echo "  git push origin main"
-            echo "  git push origin v$NEW_VERSION"
-            echo ""
-            echo "Stamped files:"
-            git diff --name-only
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add js/package.json python/pyproject.toml rust/Cargo.toml
+            git commit -m "chore: bump version to $NEW_VERSION"
+            git tag "v$NEW_VERSION"
+            git push origin main
+            git push origin "v$NEW_VERSION"
+            echo "### ✅ Committed and tagged v$NEW_VERSION" >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # ── Publish to npm (parallel) ──────────────────────────────────
@@ -165,9 +165,14 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org
 
       - name: Check if version already published to npm
         id: check
@@ -183,19 +188,31 @@ jobs:
             echo "📦 sparkid@$NEW_VERSION not found on npm — will publish"
           fi
 
-      - name: Publish to npm (dry run)
+      - name: Build and publish to npm
         if: steps.check.outputs.already_published == 'false'
         env:
-          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          echo "🏜️ DRY RUN — would publish sparkid@$NEW_VERSION to npm:"
-          echo "  npm publish --access public"
+          cd js
+          npm ci
+          npm run build
+          npm publish --access public
+          echo "### ✅ Published sparkid@${{ needs.prepare.outputs.new_version }} to npm" >> "$GITHUB_STEP_SUMMARY"
 
   # ── Publish to PyPI (parallel) ─────────────────────────────────
   publish-pypi:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
+      - uses: astral-sh/setup-uv@v8.0.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
       - name: Check if version already published to PyPI
         id: check
         env:
@@ -211,19 +228,27 @@ jobs:
             echo "📦 sparkid $NEW_VERSION not found on PyPI (HTTP $http_code) — will publish"
           fi
 
-      - name: Publish to PyPI (dry run)
+      - name: Build and publish to PyPI
         if: steps.check.outputs.already_published == 'false'
         env:
-          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
-          echo "🏜️ DRY RUN — would publish sparkid $NEW_VERSION to PyPI:"
-          echo "  uv publish"
+          cd python
+          uv build
+          uv publish
+          echo "### ✅ Published sparkid ${{ needs.prepare.outputs.new_version }} to PyPI" >> "$GITHUB_STEP_SUMMARY"
 
   # ── Publish to crates.io (parallel) ────────────────────────────
   publish-crates:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: v${{ needs.prepare.outputs.new_version }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Check if version already published to crates.io
         id: check
         env:
@@ -241,13 +266,14 @@ jobs:
             echo "📦 sparkid $NEW_VERSION not found on crates.io — will publish"
           fi
 
-      - name: Publish to crates.io (dry run)
+      - name: Publish to crates.io
         if: steps.check.outputs.already_published == 'false'
         env:
-          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
-          echo "🏜️ DRY RUN — would publish sparkid $NEW_VERSION to crates.io:"
-          echo "  cargo publish"
+          cd rust
+          cargo publish
+          echo "### ✅ Published sparkid ${{ needs.prepare.outputs.new_version }} to crates.io" >> "$GITHUB_STEP_SUMMARY"
 
   # ── Create GitHub Release (after all publishes succeed) ────────
   create-release:
@@ -273,12 +299,13 @@ jobs:
             echo "📦 Release v$NEW_VERSION does not exist — will create"
           fi
 
-      - name: Create GitHub Release (dry run)
+      - name: Create GitHub Release
         if: steps.check.outputs.already_exists == 'false'
         env:
           NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "🏜️ DRY RUN — would create GitHub Release:"
-          echo "  gh release create v$NEW_VERSION \\"
-          echo "    --title \"v$NEW_VERSION\" \\"
-          echo "    --generate-notes"
+          gh release create "v$NEW_VERSION" \
+            --title "v$NEW_VERSION" \
+            --generate-notes
+          echo "### ✅ Created GitHub Release v$NEW_VERSION" >> "$GITHUB_STEP_SUMMARY"
