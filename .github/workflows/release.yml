@@ -229,8 +229,6 @@ jobs:
 
       - name: Build and publish to PyPI
         if: steps.check.outputs.already_published == 'false'
-        env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
           cd python
           uv build
