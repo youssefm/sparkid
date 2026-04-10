@@ -16,6 +16,7 @@ permissions:
   contents: write
   checks: read
   actions: read
+  id-token: write
 
 jobs:
   # Gate: verify CI has already passed for this commit (wait up to 5 min if in progress)
@@ -190,8 +191,6 @@ jobs:
 
       - name: Build and publish to npm
         if: steps.check.outputs.already_published == 'false'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           cd js
           npm ci
