@@ -42,7 +42,7 @@ for (let i = 0; i < BASE - 1; i++) {
 // Last char ('z') stays 0 (carry)
 
 // Successor table (string version) for carry propagation
-const SUCCESSOR: string[] = new Array(SUCCESSOR_TABLE_SIZE).fill("");
+const SUCCESSOR: string[] = new Array<string>(SUCCESSOR_TABLE_SIZE).fill("");
 for (let i = 0; i < BASE - 1; i++) {
   SUCCESSOR[ALPHABET.charCodeAt(i)] = ALPHABET[i + 1];
 }
@@ -61,10 +61,8 @@ const FIRST_CHAR_CODE = ALPHABET.charCodeAt(0);
 // Allocated lazily on first use (in refillRandom) to avoid 32KB upfront cost
 // at import time. Held in a const object so inner functions can pull fast
 // const-local aliases (V8 optimizes const typed-array refs better than let).
-const randomBuffers: {
-  raw: Uint8Array<ArrayBuffer>;
-  charCodes: Uint8Array<ArrayBuffer>;
-} = {} as any;
+let randomRaw: Uint8Array<ArrayBuffer> | undefined;
+let randomCharCodes: Uint8Array<ArrayBuffer>;
 
 // Timestamp cache — only re-encoded when the millisecond advances
 let timestampCacheMs = 0;
@@ -117,19 +115,17 @@ function encodeTimestamp(timestamp: number): void {
 }
 
 function refillRandom(): void {
-  if (randomBuffers.raw === undefined) {
-    randomBuffers.raw = new Uint8Array(RANDOM_BATCH_SIZE);
-    randomBuffers.charCodes = new Uint8Array(RANDOM_BATCH_SIZE);
+  if (randomRaw === undefined) {
+    randomRaw = new Uint8Array(RANDOM_BATCH_SIZE);
+    randomCharCodes = new Uint8Array(RANDOM_BATCH_SIZE);
   }
-  const raw = randomBuffers.raw;
-  crypto.getRandomValues(raw);
+  crypto.getRandomValues(randomRaw);
   const lookup = RANDOM_CHARCODE_LOOKUP;
-  const buf = randomBuffers.charCodes;
   let count = 0;
   for (let i = 0; i < RANDOM_BATCH_SIZE; i++) {
-    const cc = lookup[raw[i]];
+    const cc = lookup[randomRaw[i]];
     if (cc !== 0) {
-      buf[count++] = cc;
+      randomCharCodes[count++] = cc;
     }
   }
   randomCharCount = count;
@@ -142,17 +138,16 @@ function seedCounter(): void {
   }
   const pos = randomCharPosition;
   randomCharPosition = pos + COUNTER_CHAR_COUNT;
-  const buf = randomBuffers.charCodes;
   prefixPlusCounterHead =
     timestampCachePrefix +
     String.fromCharCode(
-      buf[pos],
-      buf[pos + 1],
-      buf[pos + 2],
-      buf[pos + 3],
-      buf[pos + 4],
+      randomCharCodes[pos],
+      randomCharCodes[pos + 1],
+      randomCharCodes[pos + 2],
+      randomCharCodes[pos + 3],
+      randomCharCodes[pos + 4],
     );
-  counterTailCharCode = buf[pos + 5];
+  counterTailCharCode = randomCharCodes[pos + 5];
 }
 
 /**
@@ -237,18 +232,17 @@ export function generateId(): string {
 
   // Build the 21-char ID as a 2-part concat: cached 13-char prefix + 8-char suffix.
   // The suffix is built via String.fromCharCode to produce a flat string directly.
-  const buf = randomBuffers.charCodes;
   return (
     prefixPlusCounterHead +
     String.fromCharCode(
       counterTailCharCode,
-      buf[pos],
-      buf[pos + 1],
-      buf[pos + 2],
-      buf[pos + 3],
-      buf[pos + 4],
-      buf[pos + 5],
-      buf[pos + 6],
+      randomCharCodes[pos],
+      randomCharCodes[pos + 1],
+      randomCharCodes[pos + 2],
+      randomCharCodes[pos + 3],
+      randomCharCodes[pos + 4],
+      randomCharCodes[pos + 5],
+      randomCharCodes[pos + 6],
     )
   );
 }
@@ -282,7 +276,7 @@ export function extractTimestamp(id: string): Date {
   let ms = 0;
   for (let i = 0; i < TIMESTAMP_CHAR_COUNT; i++) {
     const idx = BASE58_INDEX[id.charCodeAt(i)];
-    if (idx === -1 || idx === undefined) {
+    if (idx === -1) {
       throw new TypeError(
         `extractTimestamp: invalid Base58 character '${id[i]}' at position ${i}`,
       );
@@ -291,7 +285,7 @@ export function extractTimestamp(id: string): Date {
   }
   for (let i = TIMESTAMP_CHAR_COUNT; i < ID_LENGTH; i++) {
     const idx = BASE58_INDEX[id.charCodeAt(i)];
-    if (idx === -1 || idx === undefined) {
+    if (idx === -1) {
       throw new TypeError(
         `extractTimestamp: invalid Base58 character '${id[i]}' at position ${i}`,
       );

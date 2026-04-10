@@ -43,11 +43,14 @@
     "node": ">=19"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.5.0",
+    "eslint": "^10.2.0",
     "nanoid": "^5.1.7",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0",
+    "typescript-eslint": "^8.58.1",
     "ulid": "^3.0.2",
     "uuid": "^13.0.0"
   }
