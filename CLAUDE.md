@@ -73,3 +73,8 @@ Base58 alphabet: `123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz`
 6. **Fork safety (Python)**: `os.register_at_fork` resets all live generators in child processes
 7. **Zero runtime dependencies**: JS and Python must remain dependency-free; Rust uses only `rand` (userspace CSPRNG)
 8. **no_std (Rust)**: Crate is `#![no_std]` + `alloc`. `std` feature (default) adds `SparkId::new()`, `next_id()`, `Iterator`. Without `std`, use `next_id_at(timestamp_ms)` instead.
+
+## Engineering guidelines
+
+- **No magic constants**: Extract numeric/string literals into named constants. Exceptions: 0, 1, empty string.
+- **No abbreviations**: Use full words in identifiers (e.g., `timestamp` not `ts`, `position` not `pos`, `counter` not `ctr`). Common units are fine: `ms`, `KB`, `ns`.
