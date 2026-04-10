@@ -3,14 +3,15 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      bump:
-        description: "Version bump type"
+      mode:
+        description: "Release mode"
         required: true
         type: choice
         options:
           - patch
           - minor
           - major
+          - retry
 
 permissions:
   contents: write
@@ -84,30 +85,28 @@ jobs:
       - name: Calculate version
         id: version
         env:
-          BUMP: ${{ inputs.bump }}
+          MODE: ${{ inputs.mode }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Read current version from package.json
           current=$(grep '"version"' js/package.json | head -1 | sed 's/.*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/')
 
-          # Detect retry: no release exists, but the tag does (previous run
-          # created the tag but failed before creating the GitHub release).
-          if ! gh release view "v$current" &>/dev/null; then
-            if git ls-remote --tags origin "refs/tags/v$current" | grep -q "v$current"; then
-              echo "🔄 Tag v$current exists but no release — retry mode"
-              echo "new=$current" >> "$GITHUB_OUTPUT"
-              echo "needs_stamp=false" >> "$GITHUB_OUTPUT"
-              echo "### 🔄 Retry: publishing v$current (tag exists, no release yet)" >> "$GITHUB_STEP_SUMMARY"
-              exit 0
+          if [ "$MODE" = "retry" ]; then
+            # Retry: use current version from package.json (already bumped)
+            if ! git ls-remote --tags origin "refs/tags/v$current" | grep -q "v$current"; then
+              echo "::error::Retry failed — tag v$current does not exist"
+              exit 1
             fi
-            # No release AND no tag — this is the first release ever.
-            # Fall through to normal bump path.
+            echo "🔄 Retrying release of v$current"
+            echo "new=$current" >> "$GITHUB_OUTPUT"
+            echo "needs_stamp=false" >> "$GITHUB_OUTPUT"
+            echo "### 🔄 Retry: publishing v$current" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
           fi
 
-          # Normal path: bump from the latest released version
+          # Normal path: bump version
           IFS='.' read -r major minor patch <<< "$current"
 
-          case "$BUMP" in
+          case "$MODE" in
             major) major=$((major + 1)); minor=0; patch=0 ;;
             minor) minor=$((minor + 1)); patch=0 ;;
             patch) patch=$((patch + 1)) ;;
@@ -116,7 +115,7 @@ jobs:
           new="${major}.${minor}.${patch}"
           echo "new=$new" >> "$GITHUB_OUTPUT"
           echo "needs_stamp=true" >> "$GITHUB_OUTPUT"
-          echo "### Version bump: $current → $new ($BUMP)" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Version bump: $current → $new ($MODE)" >> "$GITHUB_STEP_SUMMARY"
 
       # ── Stamp, build, commit, tag, push ────────────────────────
       - uses: actions/setup-node@v6
