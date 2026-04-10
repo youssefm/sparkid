@@ -139,14 +139,24 @@ describe("Counter monotonicity", () => {
   });
 
   it("counter portion increments within the same millisecond", () => {
-    // Generate a large burst to guarantee many IDs share the first timestamp,
-    // even on slow CI machines.
+    // Generate a large burst and pick the timestamp that appears most often,
+    // so the test passes even on slow CI runners where the first ms boundary
+    // is crossed very quickly.
     const ids: string[] = [];
-    for (let i = 0; i < 5000; i++) {
+    for (let i = 0; i < 10_000; i++) {
       ids.push(generateId());
     }
-    const ts = ids[0].slice(0, 8);
-    const sameTs = ids.filter((id) => id.slice(0, 8) === ts);
+    const groups = new Map<string, string[]>();
+    for (const id of ids) {
+      const ts = id.slice(0, 8);
+      let arr = groups.get(ts);
+      if (!arr) { arr = []; groups.set(ts, arr); }
+      arr.push(id);
+    }
+    let sameTs: string[] = [];
+    for (const arr of groups.values()) {
+      if (arr.length > sameTs.length) sameTs = arr;
+    }
     assert.ok(sameTs.length > 1, "need multiple IDs in same ms for this test");
     for (let i = 1; i < sameTs.length; i++) {
       assert.ok(
