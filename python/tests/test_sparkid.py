@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from unittest.mock import patch
 
-from sparkid import IdGenerator, generate_id
+from sparkid import IdGenerator, generate_id, extract_timestamp
 from sparkid._generator import (
     _FIRST_CHAR,
     ALPHABET,
@@ -609,5 +609,57 @@ class TestPublicAPI:
         import sparkid
 
         assert hasattr(sparkid, "generate_id")
+        assert hasattr(sparkid, "extract_timestamp")
         assert hasattr(sparkid, "IdGenerator")
-        assert sparkid.__all__ == ["generate_id", "IdGenerator"]
+        assert sparkid.__all__ == ["generate_id", "extract_timestamp", "IdGenerator"]
+
+
+# ---------------------------------------------------------------------------
+# extract_timestamp
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTimestamp:
+    def test_round_trip(self):
+        before = time.time_ns() // 1_000_000
+        id_ = generate_id()
+        after = time.time_ns() // 1_000_000
+        ts = extract_timestamp(id_)
+        extracted_ms = int(ts.timestamp() * 1000)
+        assert before - 5 <= extracted_ms <= after + 5
+
+    def test_known_value(self):
+        from datetime import datetime, timezone
+
+        known_ms = 1700000000000
+        # Encode known_ms into 8 Base58 chars
+        val = known_ms
+        chars = []
+        for _ in range(8):
+            val, r = divmod(val, BASE)
+            chars.append(ALPHABET[r])
+        encoded = "".join(reversed(chars))
+        id_ = encoded + "1" * 13  # pad counter + random with '1's
+        ts = extract_timestamp(id_)
+        assert int(ts.timestamp() * 1000) == known_ms
+        assert ts.tzinfo is not None
+
+    def test_wrong_length_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            extract_timestamp("abc")
+        with pytest.raises(ValueError):
+            extract_timestamp("1" * 20)
+        with pytest.raises(ValueError):
+            extract_timestamp("1" * 22)
+
+    def test_invalid_chars_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            extract_timestamp("0" + "1" * 20)
+        with pytest.raises(ValueError):
+            extract_timestamp("O" + "1" * 20)
+        with pytest.raises(ValueError):
+            extract_timestamp("I" + "1" * 20)

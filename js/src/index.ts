@@ -3,8 +3,10 @@ const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE = ALPHABET.length; // 58
 
 // ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
+const TIMESTAMP_CHAR_COUNT = 8;
 const COUNTER_CHAR_COUNT = 6;
 const RANDOM_CHAR_COUNT = 7;
+const ID_LENGTH = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT + RANDOM_CHAR_COUNT;
 
 // How many random bytes to fetch per batch. After rejection sampling,
 // ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
@@ -39,6 +41,13 @@ for (let i = 0; i < BASE - 1; i++) {
   SUCCESSOR[ALPHABET.charCodeAt(i)] = ALPHABET[i + 1];
 }
 
+// Reverse lookup: charCode -> Base58 index (0-57), or -1 if invalid.
+// Used for timestamp decoding in extractTimestamp.
+const BASE58_INDEX: Int8Array = new Int8Array(123).fill(-1);
+for (let i = 0; i < BASE; i++) {
+  BASE58_INDEX[ALPHABET.charCodeAt(i)] = i;
+}
+
 const FIRST_CHAR = ALPHABET[0];
 const FIRST_CHAR_CODE = ALPHABET.charCodeAt(0);
 
@@ -46,7 +55,10 @@ const FIRST_CHAR_CODE = ALPHABET.charCodeAt(0);
 // Allocated lazily on first use (in refillRandom) to avoid 32KB upfront cost
 // at import time. Held in a const object so inner functions can pull fast
 // const-local aliases (V8 optimizes const typed-array refs better than let).
-const randomBuffers: { raw: Uint8Array; charCodes: Uint8Array } = {} as any;
+const randomBuffers: {
+  raw: Uint8Array<ArrayBuffer>;
+  charCodes: Uint8Array<ArrayBuffer>;
+} = {} as any;
 
 // Timestamp cache — only re-encoded when the millisecond advances
 let timestampCacheMs = 0;
@@ -231,4 +243,51 @@ export function generateId(): string {
       buf[pos + 6],
     )
   );
+}
+
+/**
+ * Extract the embedded timestamp from a sparkid as a `Date`.
+ *
+ * Decodes the first 8 Base58 characters back to the original millisecond
+ * timestamp and returns it as a `Date` object.
+ *
+ * @param id - A 21-character Base58 sparkid string.
+ * @returns The `Date` corresponding to the embedded timestamp.
+ * @throws {TypeError} If `id` is not a valid 21-char Base58 string.
+ *
+ * @example
+ * ```ts
+ * const id = generateId();
+ * const ts = extractTimestamp(id);
+ * console.log(ts.toISOString());
+ * ```
+ */
+export function extractTimestamp(id: string): Date {
+  if (typeof id !== "string") {
+    throw new TypeError("extractTimestamp: expected a string argument");
+  }
+  if (id.length !== ID_LENGTH) {
+    throw new TypeError(
+      `extractTimestamp: expected a ${ID_LENGTH}-character string, got ${id.length}`,
+    );
+  }
+  let ms = 0;
+  for (let i = 0; i < TIMESTAMP_CHAR_COUNT; i++) {
+    const idx = BASE58_INDEX[id.charCodeAt(i)];
+    if (idx === -1 || idx === undefined) {
+      throw new TypeError(
+        `extractTimestamp: invalid Base58 character '${id[i]}' at position ${i}`,
+      );
+    }
+    ms = ms * BASE + idx;
+  }
+  for (let i = TIMESTAMP_CHAR_COUNT; i < ID_LENGTH; i++) {
+    const idx = BASE58_INDEX[id.charCodeAt(i)];
+    if (idx === -1 || idx === undefined) {
+      throw new TypeError(
+        `extractTimestamp: invalid Base58 character '${id[i]}' at position ${i}`,
+      );
+    }
+  }
+  return new Date(ms);
 }

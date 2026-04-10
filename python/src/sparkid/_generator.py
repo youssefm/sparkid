@@ -2,14 +2,17 @@ import os
 import threading
 import time
 import weakref
+from datetime import datetime, timezone
 
 # Base58 alphabet — excludes visually ambiguous characters (0, O, I, l)
 ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 BASE = len(ALPHABET)  # 58
 
 # ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
+_TIMESTAMP_CHAR_COUNT = 8
 _COUNTER_CHAR_COUNT = 6
 _RANDOM_CHAR_COUNT = 7
+_ID_LENGTH = _TIMESTAMP_CHAR_COUNT + _COUNTER_CHAR_COUNT + _RANDOM_CHAR_COUNT
 
 # How many random bytes to fetch per batch. After rejection sampling,
 # ~90.6% survive (58/64), yielding ~232 valid chars.
@@ -37,6 +40,9 @@ for _i in range(len(ALPHABET) - 1):
 _SUCCESSOR = [-1] * 123
 for _i in range(len(ALPHABET) - 1):
     _SUCCESSOR[ord(ALPHABET[_i])] = ord(ALPHABET[_i + 1])
+
+# Reverse lookup: char -> Base58 index (0-57). Used for timestamp decoding.
+_BASE58_INDEX = {ch: i for i, ch in enumerate(ALPHABET)}
 
 _FIRST_CHAR = ALPHABET[0]
 _FIRST_BYTE = ord(ALPHABET[0])
@@ -253,3 +259,36 @@ def generate_id() -> str:
     within each thread; across threads they are unique but unordered.
     """
     return _local.gen()
+
+
+def extract_timestamp(id: str) -> datetime:
+    """Extract the embedded timestamp from a sparkid as a UTC datetime.
+
+    Decodes the first 8 Base58 characters back to the original millisecond
+    timestamp and returns it as a timezone-aware ``datetime`` (UTC).
+
+    Args:
+        id: A 21-character Base58 sparkid string.
+
+    Returns:
+        A ``datetime`` corresponding to the embedded timestamp.
+
+    Raises:
+        ValueError: If *id* is not a valid 21-char Base58 string.
+    """
+    if not isinstance(id, str):
+        raise ValueError("extract_timestamp: expected a string argument")
+    if len(id) != _ID_LENGTH:
+        raise ValueError(
+            f"extract_timestamp: expected a {_ID_LENGTH}-character string, got {len(id)}"
+        )
+    index = _BASE58_INDEX
+    for i, ch in enumerate(id):
+        if ch not in index:
+            raise ValueError(
+                f"extract_timestamp: invalid Base58 character {ch!r} at position {i}"
+            )
+    ms = 0
+    for ch in id[:_TIMESTAMP_CHAR_COUNT]:
+        ms = ms * BASE + index[ch]
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)

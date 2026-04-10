@@ -1005,3 +1005,39 @@ fn test_parse_error_eq() {
     // Both wrong length, but different lengths
     assert_ne!(err1, err3);
 }
+
+// ---------------------------------------------------------------------------
+// Timestamp extraction
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_timestamp_ms_round_trip() {
+    let known_ms: u64 = 1_700_000_000_000;
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id_at(known_ms);
+    assert_eq!(id.timestamp_ms(), known_ms);
+}
+
+#[test]
+fn test_timestamp_returns_system_time() {
+    let before = SystemTime::now();
+    let id = SparkId::new();
+    let after = SystemTime::now();
+    let ts = id.timestamp();
+    assert!(ts >= before - std::time::Duration::from_millis(50));
+    assert!(ts <= after + std::time::Duration::from_millis(50));
+}
+
+#[test]
+fn test_timestamp_ms_known_value() {
+    // Manually construct an ID with a known timestamp of 0
+    // Timestamp 0 encodes as "11111111" (all first Base58 chars)
+    let id_str = "111111111111111111111";
+    let id: SparkId = id_str.parse().unwrap();
+    assert_eq!(id.timestamp_ms(), 0);
+
+    // Construct ID with timestamp = 58 (should be "11111121" + 13 pad chars)
+    let id_str2 = "111111211111111111111";
+    let id2: SparkId = id_str2.parse().unwrap();
+    assert_eq!(id2.timestamp_ms(), 58);
+}

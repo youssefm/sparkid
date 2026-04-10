@@ -3,7 +3,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { generateId } from "../src/index.ts";
+import { generateId, extractTimestamp } from "../src/index.ts";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE = ALPHABET.length; // 58
@@ -377,6 +377,58 @@ describe("Public API", () => {
   it("generateId is the only named export", async () => {
     const mod = await import("../src/index.ts");
     const exports = Object.keys(mod);
-    assert.deepEqual(exports, ["generateId"]);
+    assert.deepEqual(exports.sort(), ["extractTimestamp", "generateId"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractTimestamp
+// ---------------------------------------------------------------------------
+
+describe("extractTimestamp", () => {
+  it("round-trips: extracted timestamp is within ±5ms of Date.now()", () => {
+    const before = Date.now();
+    const id = generateId();
+    const after = Date.now();
+    const ts = extractTimestamp(id);
+    assert.ok(
+      ts.getTime() >= before - 5 && ts.getTime() <= after + 5,
+      `extracted ${ts.getTime()} not in [${before - 5}, ${after + 5}]`,
+    );
+  });
+
+  it("decodes a known timestamp correctly", () => {
+    // Encode 1700000000000 into first 8 chars, pad rest with valid Base58
+    const knownMs = 1700000000000;
+    let encoded = "";
+    let val = knownMs;
+    const chars: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      chars.push(ALPHABET[val % BASE]);
+      val = Math.trunc(val / BASE);
+    }
+    encoded = chars.reverse().join("");
+    const id = encoded + "1".repeat(13); // pad counter + random with '1's
+    const ts = extractTimestamp(id);
+    assert.equal(ts.getTime(), knownMs);
+  });
+
+  it("throws TypeError for wrong length", () => {
+    assert.throws(() => extractTimestamp("abc"), TypeError);
+    assert.throws(() => extractTimestamp("1".repeat(20)), TypeError);
+    assert.throws(() => extractTimestamp("1".repeat(22)), TypeError);
+  });
+
+  it("throws TypeError for invalid characters", () => {
+    assert.throws(() => extractTimestamp("0" + "1".repeat(20)), TypeError);
+    assert.throws(() => extractTimestamp("O" + "1".repeat(20)), TypeError);
+    assert.throws(() => extractTimestamp("I" + "1".repeat(20)), TypeError);
+    assert.throws(() => extractTimestamp("l" + "1".repeat(20)), TypeError);
+  });
+
+  it("throws TypeError for non-string input", () => {
+    assert.throws(() => extractTimestamp(123 as any), TypeError);
+    assert.throws(() => extractTimestamp(null as any), TypeError);
+    assert.throws(() => extractTimestamp(undefined as any), TypeError);
   });
 });

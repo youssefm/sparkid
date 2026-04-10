@@ -18,9 +18,10 @@ const ALPHABET: &[u8; 58] = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqr
 const BASE: u64 = 58;
 
 // ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
+const TIMESTAMP_CHAR_COUNT: usize = 8;
 const COUNTER_CHAR_COUNT: usize = 6;
 const RANDOM_CHAR_COUNT: usize = 7;
-const ID_LENGTH: usize = 21;
+const ID_LENGTH: usize = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT + RANDOM_CHAR_COUNT;
 
 // How many random bytes to fetch per batch. After rejection sampling,
 // ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
@@ -74,6 +75,17 @@ const IS_BASE58: [bool; 256] = {
     let mut i = 0;
     while i < 58 {
         table[ALPHABET[i] as usize] = true;
+        i += 1;
+    }
+    table
+};
+
+// Reverse-lookup table: ASCII byte -> Base58 index (0-57), or 255 for invalid.
+const BASE58_INDEX: [u8; 256] = {
+    let mut table = [255u8; 256];
+    let mut i: usize = 0;
+    while i < 58 {
+        table[ALPHABET[i] as usize] = i as u8;
         i += 1;
     }
     table
@@ -160,6 +172,30 @@ impl SparkId {
     fn as_str(&self) -> &str {
         // All bytes are ASCII Base58 characters, so this is always valid UTF-8.
         core::str::from_utf8(&self.0).expect("SparkId contains invalid UTF-8")
+    }
+
+    /// Returns the embedded timestamp as milliseconds since the Unix epoch.
+    ///
+    /// This is available in both `std` and `no_std` environments.
+    pub fn timestamp_ms(&self) -> u64 {
+        let mut val: u64 = 0;
+        for &b in &self.0[..TIMESTAMP_CHAR_COUNT] {
+            val = val * 58 + BASE58_INDEX[b as usize] as u64;
+        }
+        val
+    }
+
+    /// Returns the embedded timestamp as a [`SystemTime`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let id = sparkid::SparkId::new();
+    /// let ts = id.timestamp();
+    /// ```
+    #[cfg(feature = "std")]
+    pub fn timestamp(&self) -> SystemTime {
+        UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms())
     }
 }
 
