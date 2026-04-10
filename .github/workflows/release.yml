@@ -85,8 +85,26 @@ jobs:
         id: version
         env:
           BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Read current version from package.json
           current=$(grep '"version"' js/package.json | head -1 | sed 's/.*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/')
+
+          # Detect retry: no release exists, but the tag does (previous run
+          # created the tag but failed before creating the GitHub release).
+          if ! gh release view "v$current" &>/dev/null; then
+            if git ls-remote --tags origin "refs/tags/v$current" | grep -q "v$current"; then
+              echo "🔄 Tag v$current exists but no release — retry mode"
+              echo "new=$current" >> "$GITHUB_OUTPUT"
+              echo "needs_stamp=false" >> "$GITHUB_OUTPUT"
+              echo "### 🔄 Retry: publishing v$current (tag exists, no release yet)" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            # No release AND no tag — this is the first release ever.
+            # Fall through to normal bump path.
+          fi
+
+          # Normal path: bump from the latest released version
           IFS='.' read -r major minor patch <<< "$current"
 
           case "$BUMP" in
@@ -96,70 +114,49 @@ jobs:
           esac
 
           new="${major}.${minor}.${patch}"
-          echo "current=$current" >> "$GITHUB_OUTPUT"
           echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "needs_stamp=true" >> "$GITHUB_OUTPUT"
           echo "### Version bump: $current → $new ($BUMP)" >> "$GITHUB_STEP_SUMMARY"
 
-      # ── Stamp version into all package manifests ───────────────
-      - name: Stamp version in package.json
-        env:
-          NEW_VERSION: ${{ steps.version.outputs.new }}
-        run: |
-          sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" js/package.json
-
-      - name: Stamp version in pyproject.toml
-        env:
-          NEW_VERSION: ${{ steps.version.outputs.new }}
-        run: |
-          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" python/pyproject.toml
-
-      - name: Stamp version in Cargo.toml
-        env:
-          NEW_VERSION: ${{ steps.version.outputs.new }}
-        run: |
-          # Only replace the version under [package], not under [dependencies]
-          sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" rust/Cargo.toml
-
-      # ── Build all three packages ──────────────────────────────
+      # ── Stamp, build, commit, tag, push ────────────────────────
       - uses: actions/setup-node@v6
+        if: steps.version.outputs.needs_stamp == 'true'
         with:
           node-version: 24
-      - run: npm ci
-        working-directory: js
-      - run: npm run build
-        working-directory: js
-
       - uses: astral-sh/setup-uv@v8.0.0
+        if: steps.version.outputs.needs_stamp == 'true'
       - uses: actions/setup-python@v6
+        if: steps.version.outputs.needs_stamp == 'true'
         with:
           python-version: "3.14"
-      - run: uv build
-        working-directory: python
-
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release
-        working-directory: rust
+        if: steps.version.outputs.needs_stamp == 'true'
 
-      # ── Commit, tag, push (skip if tag already exists) ─────────
-      - name: Commit, tag, push
+      - name: Stamp, build, commit, tag, push
+        if: steps.version.outputs.needs_stamp == 'true'
         env:
           NEW_VERSION: ${{ steps.version.outputs.new }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Check if tag already exists on remote
-          if git ls-remote --tags origin "refs/tags/v$NEW_VERSION" | grep -q "v$NEW_VERSION"; then
-            echo "⏭️ Tag v$NEW_VERSION already exists on remote — skipping commit/tag/push"
-            echo "### ⏭️ Tag already exists — skipped commit/tag/push" >> "$GITHUB_STEP_SUMMARY"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git commit -m "chore: bump version to $NEW_VERSION"
-            git tag "v$NEW_VERSION"
-            git push origin main
-            git push origin "v$NEW_VERSION"
-            echo "### ✅ Committed and tagged v$NEW_VERSION" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          # Stamp version into all package manifests
+          sed -i "s/\"version\": \".*\"/\"version\": \"$NEW_VERSION\"/" js/package.json
+          sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" python/pyproject.toml
+          sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" rust/Cargo.toml
+
+          # Build (updates lock files)
+          cd js && npm ci && npm run build && cd ..
+          cd python && uv build && cd ..
+          cd rust && cargo build --release && cd ..
+
+          # Commit, tag, push
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: bump version to $NEW_VERSION"
+          git tag "v$NEW_VERSION"
+          git push origin main
+          git push origin "v$NEW_VERSION"
+          echo "### ✅ Committed and tagged v$NEW_VERSION" >> "$GITHUB_STEP_SUMMARY"
 
   # ── Publish to npm (parallel) ──────────────────────────────────
   publish-npm:
@@ -264,6 +261,7 @@ jobs:
           fi
 
       - name: Authenticate with crates.io
+        if: steps.check.outputs.already_published == 'false'
         uses: rust-lang/crates-io-auth-action@v1
         id: crates-auth
 
