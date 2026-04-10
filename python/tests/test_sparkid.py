@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from unittest.mock import patch
 
-from sparkid import IdGenerator, generate_id, extract_timestamp
+from sparkid import IdGenerator, extract_timestamp, generate_id
 from sparkid._generator import (
     _FIRST_CHAR,
     ALPHABET,
@@ -629,8 +629,6 @@ class TestExtractTimestamp:
         assert before - 5 <= extracted_ms <= after + 5
 
     def test_known_value(self):
-        from datetime import datetime, timezone
-
         known_ms = 1700000000000
         # Encode known_ms into 8 Base58 chars
         val = known_ms

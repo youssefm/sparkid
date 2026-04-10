@@ -289,7 +289,8 @@ def extract_timestamp(id: str) -> datetime:
         raise ValueError("extract_timestamp: expected a string argument")
     if len(id) != _ID_LENGTH:
         raise ValueError(
-            f"extract_timestamp: expected a {_ID_LENGTH}-character string, got {len(id)}"
+            f"extract_timestamp: expected a {_ID_LENGTH}-character string,"
+            f" got {len(id)}"
         )
     index = _BASE58_INDEX
     for i, ch in enumerate(id):
