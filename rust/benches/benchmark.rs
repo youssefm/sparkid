@@ -142,5 +142,15 @@ fn bench_comparison(c: &mut Criterion) {
     println!("  ulid:    {}", ulid::Ulid::new());
 }
 
-criterion_group!(benches, bench_generator, bench_thread_local, bench_comparison);
+fn bench_parse(c: &mut Criterion) {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let id_string = id.to_string();
+
+    c.bench_function("sparkid::SparkId::from_str", |b| {
+        b.iter(|| id_string.parse::<SparkId>().unwrap())
+    });
+}
+
+criterion_group!(benches, bench_generator, bench_thread_local, bench_parse, bench_comparison);
 criterion_main!(benches);

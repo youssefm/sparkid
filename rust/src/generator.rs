@@ -417,20 +417,32 @@ impl FromStr for SparkId {
                 kind: ParseErrorKind::InvalidLength(bytes.len()),
             });
         }
-        let mut indices = [0u8; ID_LENGTH];
-        for (position, &byte) in bytes.iter().enumerate() {
-            let index = DECODE[byte as usize];
+        let mut value: u128 = 0;
+        let mut position = 0;
+        while position < 20 {
+            let index = DECODE[bytes[position] as usize];
             if index == INVALID_INDEX {
                 return Err(ParseSparkIdError {
                     kind: ParseErrorKind::InvalidChar {
-                        byte,
+                        byte: bytes[position],
                         position,
                     },
                 });
             }
-            indices[position] = index;
+            value = (value << 6) | index as u128;
+            position += 1;
         }
-        Ok(SparkId(pack_indices(&indices)))
+        let index = DECODE[bytes[20] as usize];
+        if index == INVALID_INDEX {
+            return Err(ParseSparkIdError {
+                kind: ParseErrorKind::InvalidChar {
+                    byte: bytes[20],
+                    position: 20,
+                },
+            });
+        }
+        value = (value << 8) | (index as u128) << 2;
+        Ok(SparkId(value))
     }
 }
 
