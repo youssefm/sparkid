@@ -1,4 +1,3 @@
-use core::borrow::Borrow;
 use core::fmt;
 use core::ops::Deref;
 use core::str::FromStr;
@@ -6,7 +5,6 @@ use core::str::FromStr;
 #[cfg(feature = "std")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
@@ -29,68 +27,22 @@ const ID_LENGTH: usize = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT + RANDOM_CHAR
 // ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
 const RANDOM_BATCH_SIZE: usize = 16384;
 
-const FIRST_BYTE: u8 = ALPHABET[0]; // b'1'
+// Index-space constants (indices 0-57 into the Base58 alphabet)
+const FIRST_INDEX: u8 = 0;
+const MAX_INDEX: u8 = 57;
+const INVALID_INDEX: u8 = 0xFF;
+
+// Number of 6-bit fields packed into the u128 binary representation
+const PACKED_BYTE_COUNT: usize = 16;
 
 // Derived layout constants
 const COUNTER_HEAD_CHAR_COUNT: usize = COUNTER_CHAR_COUNT - 1;
 const COUNTER_TAIL_OFFSET: usize = TIMESTAMP_CHAR_COUNT + COUNTER_HEAD_CHAR_COUNT;
 const RANDOM_START_OFFSET: usize = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT;
-const SUCCESSOR_TABLE_SIZE: usize = ALPHABET[BASE_USIZE - 1] as usize + 1; // b'z' + 1
 
-// Timestamp encoding: remainder (0-57) -> single byte
-const TIMESTAMP_LOOKUP: [u8; BASE_USIZE] = {
-    let mut table = [0u8; BASE_USIZE];
-    let mut i = 0;
-    while i < BASE_USIZE {
-        table[i] = ALPHABET[i];
-        i += 1;
-    }
-    table
-};
-
-// Random encoding: for each byte 0-255, mask to 6 bits (0-63).
-// Values < 58 map to their alphabet byte; values >= 58 are rejected (0).
-// No modulo bias.
-const RANDOM_BYTE_LOOKUP: [u8; 256] = {
-    let mut table = [0u8; 256];
-    let mut byte = 0;
-    while byte < 256 {
-        let value = byte & 0x3f;
-        if value < BASE_USIZE {
-            table[byte] = ALPHABET[value];
-        }
-        // else stays 0 (rejected)
-        byte += 1;
-    }
-    table
-};
-
-// Successor table: byte -> next Base58 byte, or 0 if carry needed.
-const SUCCESSOR: [u8; SUCCESSOR_TABLE_SIZE] = {
-    let mut table = [0u8; SUCCESSOR_TABLE_SIZE]; // b'z' + 1
-    let mut i = 0;
-    while i < BASE_USIZE - 1 {
-        table[ALPHABET[i] as usize] = ALPHABET[i + 1];
-        i += 1;
-    }
-    // Last char (b'z') stays 0 (carry)
-    table
-};
-
-// Validation table: for each byte 0-255, true if it's in the Base58 alphabet.
-const IS_BASE58: [bool; 256] = {
-    let mut table = [false; 256];
-    let mut i = 0;
-    while i < BASE_USIZE {
-        table[ALPHABET[i] as usize] = true;
-        i += 1;
-    }
-    table
-};
-
-// Reverse-lookup table: ASCII byte -> Base58 index (0-57), or 255 for invalid.
-const BASE58_INDEX: [u8; 256] = {
-    let mut table = [255u8; 256];
+// Reverse-lookup table: ASCII byte -> Base58 index (0-57), or 0xFF for invalid.
+const DECODE: [u8; 256] = {
+    let mut table = [INVALID_INDEX; 256];
     let mut i: usize = 0;
     while i < BASE_USIZE {
         table[ALPHABET[i] as usize] = i as u8;
@@ -99,26 +51,65 @@ const BASE58_INDEX: [u8; 256] = {
     table
 };
 
-/// The error returned when parsing a string as a [`SparkId`] fails.
+/// Pack the first 13 indices (timestamp + counter head) into the upper
+/// portion of a `u128`, occupying bits 127..50 with bits 49..0 zeroed.
 ///
-/// Returned by [`SparkId::from_str`] and [`TryFrom<&str>`] when the input
-/// is not a valid 21-char Base58 ID.
+/// Used to cache the slow-changing prefix so the hot path only packs the
+/// 8 fast-changing suffix indices (counter tail + random) using `u64`.
+fn pack_prefix(indices: &[u8; ID_LENGTH]) -> u128 {
+    let mut value: u128 = 0;
+    let mut i = 0;
+    while i < RANDOM_START_OFFSET - 1 {
+        value = (value << 6) | indices[i] as u128;
+        i += 1;
+    }
+    // Shift to position: 13 indices × 6 bits = 78 bits of data.
+    // The lowest index (index 12) needs to land at bits 55..50,
+    // so shift left by 50.
+    value << 50
+}
+
+/// Pack the suffix (counter tail + 7 random indices) into the lower 50 bits
+/// of a `u128`. Uses `u64` arithmetic since the result fits in 50 bits,
+/// avoiding expensive u128 shift/OR chains on the hot path.
+#[inline(always)]
+fn pack_suffix(counter_tail: u8, random: &[u8]) -> u128 {
+    let mut value: u64 = counter_tail as u64;
+    value = (value << 6) | random[0] as u64;
+    value = (value << 6) | random[1] as u64;
+    value = (value << 6) | random[2] as u64;
+    value = (value << 6) | random[3] as u64;
+    value = (value << 6) | random[4] as u64;
+    value = (value << 6) | random[5] as u64;
+    // Last index + 2 padding bits
+    value = (value << 8) | (random[6] as u64) << 2;
+    value as u128
+}
+
+/// The error returned when parsing a string or binary representation
+/// as a [`SparkId`] fails.
+///
+/// Returned by [`SparkId::from_str`], [`TryFrom<&str>`], and
+/// [`SparkId::from_bytes`] when the input is not a valid SparkId.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseSparkIdError {
     kind: ParseErrorKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::enum_variant_names)]
 enum ParseErrorKind {
     InvalidLength(usize),
     InvalidChar { byte: u8, position: usize },
+    InvalidBinaryIndex { value: u8, byte_position: usize },
+    InvalidPadding,
 }
 
 impl fmt::Display for ParseSparkIdError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            ParseErrorKind::InvalidLength(len) => {
-                write!(f, "invalid SparkId length: expected 21, got {len}")
+            ParseErrorKind::InvalidLength(length) => {
+                write!(f, "invalid SparkId length: expected 21, got {length}")
             }
             ParseErrorKind::InvalidChar { byte, position } => {
                 write!(
@@ -127,15 +118,30 @@ impl fmt::Display for ParseSparkIdError {
                     *byte as char
                 )
             }
+            ParseErrorKind::InvalidBinaryIndex {
+                value,
+                byte_position,
+            } => {
+                write!(
+                    f,
+                    "invalid 6-bit index {value} at byte {byte_position} in binary SparkId"
+                )
+            }
+            ParseErrorKind::InvalidPadding => {
+                write!(f, "non-zero padding bits in binary SparkId")
+            }
         }
     }
 }
 
-/// A unique, time-sortable, 21-char Base58 ID.
+/// A unique, time-sortable, Base58-encoded ID stored as a `u128`.
 ///
-/// `SparkId` is a stack-allocated, `Copy` type that wraps `[u8; 21]`.
-/// It dereferences to `&str` for zero-cost string access, and implements
-/// `Display` for formatting without heap allocation.
+/// `SparkId` is a stack-allocated, `Copy` type that wraps a `u128`.
+/// The 21 Base58 characters (each a 6-bit index, 0-57) are bit-packed
+/// into the 128-bit value, preserving lexicographic sort order.
+///
+/// Use [`as_str`](SparkId::as_str) to obtain a stack-allocated
+/// [`SparkIdStr`] for zero-allocation string access.
 ///
 /// # Examples
 ///
@@ -143,13 +149,19 @@ impl fmt::Display for ParseSparkIdError {
 /// use sparkid::SparkId;
 ///
 /// let id = SparkId::new();
-/// assert_eq!(id.len(), 21);
-/// println!("{id}");              // Display, no allocation
-/// let s: &str = &id;             // Deref to &str, no allocation
-/// let owned: String = id.into(); // Into<String> when you need ownership
+/// let s = id.as_str();             // Stack-allocated string, no heap
+/// println!("{id}");                 // Display, no allocation
+/// let owned: String = id.into();   // Into<String> when you need ownership
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SparkId([u8; ID_LENGTH]);
+pub struct SparkId(u128);
+
+/// A stack-allocated, 21-byte ASCII representation of a [`SparkId`].
+///
+/// Obtained via [`SparkId::as_str`]. Dereferences to `&str` for
+/// zero-cost string access.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SparkIdStr([u8; ID_LENGTH]);
 
 #[cfg(feature = "std")]
 use std::cell::RefCell;
@@ -169,7 +181,8 @@ impl SparkId {
     ///
     /// ```
     /// let id = sparkid::SparkId::new();
-    /// assert_eq!(id.len(), 21);
+    /// let s = id.as_str();
+    /// assert_eq!(s.len(), 21);
     /// ```
     #[cfg(feature = "std")]
     #[allow(clippy::new_without_default)]
@@ -177,20 +190,91 @@ impl SparkId {
         LOCAL_GEN.with(|generator| generator.borrow_mut().next_id())
     }
 
-    fn as_str(&self) -> &str {
-        // All bytes are ASCII Base58 characters, so this is always valid UTF-8.
-        core::str::from_utf8(&self.0).expect("SparkId contains invalid UTF-8")
+    /// Returns the inner `u128` binary representation.
+    pub fn as_u128(&self) -> u128 {
+        self.0
+    }
+
+    /// Construct a `SparkId` from its `u128` binary representation.
+    ///
+    /// Validates that every 6-bit field is in the range `[0, 57]` and that
+    /// the 2 padding bits are zero. This is the inverse of [`as_u128`](Self::as_u128).
+    pub fn from_u128(value: u128) -> Result<Self, ParseSparkIdError> {
+        Self::from_bytes(value.to_be_bytes())
+    }
+
+    /// Returns the 16-byte big-endian binary representation.
+    pub fn to_bytes(&self) -> [u8; PACKED_BYTE_COUNT] {
+        self.0.to_be_bytes()
+    }
+
+    /// Construct a `SparkId` from its 16-byte big-endian binary representation.
+    ///
+    /// Validates that every 6-bit field is in the range `[0, 57]` and that
+    /// the 2 padding bits in the last byte are zero.
+    pub fn from_bytes(bytes: [u8; PACKED_BYTE_COUNT]) -> Result<Self, ParseSparkIdError> {
+        let value = u128::from_be_bytes(bytes);
+
+        // Validate padding: the bottom 2 bits must be zero.
+        if value & 0x03 != 0 {
+            return Err(ParseSparkIdError {
+                kind: ParseErrorKind::InvalidPadding,
+            });
+        }
+
+        // Validate all 21 six-bit fields are in [0, 57].
+        let mut shift = 122i32;
+        let mut char_index = 0usize;
+        while char_index < ID_LENGTH {
+            let index = ((value >> shift as u32) & 0x3F) as u8;
+            if index > MAX_INDEX {
+                return Err(ParseSparkIdError {
+                    kind: ParseErrorKind::InvalidBinaryIndex {
+                        value: index,
+                        byte_position: (char_index * 6) / 8,
+                    },
+                });
+            }
+            shift -= 6;
+            char_index += 1;
+        }
+
+        Ok(SparkId(value))
+    }
+
+    /// Returns a stack-allocated [`SparkIdStr`] containing the 21-char
+    /// Base58 string representation.
+    pub fn as_str(&self) -> SparkIdStr {
+        SparkIdStr::from_packed(self.0)
     }
 
     /// Returns the embedded timestamp as milliseconds since the Unix epoch.
     ///
-    /// This is available in both `std` and `no_std` environments.
+    /// Unpacks the first 8 Base58 indices from the binary representation
+    /// and reconstructs the original timestamp via Horner's method.
     pub fn timestamp_ms(&self) -> u64 {
-        let mut val: u64 = 0;
-        for &b in &self.0[..TIMESTAMP_CHAR_COUNT] {
-            val = val * BASE + BASE58_INDEX[b as usize] as u64;
-        }
-        val
+        // Extract the first 8 six-bit indices directly from the u128.
+        // Index 0 is at bits 127..122, index 1 at 121..116, etc.
+        let v = self.0;
+        let index_0 = ((v >> 122) & 0x3F) as u64;
+        let index_1 = ((v >> 116) & 0x3F) as u64;
+        let index_2 = ((v >> 110) & 0x3F) as u64;
+        let index_3 = ((v >> 104) & 0x3F) as u64;
+        let index_4 = ((v >> 98) & 0x3F) as u64;
+        let index_5 = ((v >> 92) & 0x3F) as u64;
+        let index_6 = ((v >> 86) & 0x3F) as u64;
+        let index_7 = ((v >> 80) & 0x3F) as u64;
+
+        // Horner's method: val = i0*58^7 + i1*58^6 + ... + i7*58^0
+        let mut value: u64 = index_0;
+        value = value * BASE + index_1;
+        value = value * BASE + index_2;
+        value = value * BASE + index_3;
+        value = value * BASE + index_4;
+        value = value * BASE + index_5;
+        value = value * BASE + index_6;
+        value = value * BASE + index_7;
+        value
     }
 
     /// Returns the embedded timestamp as a [`SystemTime`].
@@ -207,65 +291,76 @@ impl SparkId {
     }
 }
 
-impl Deref for SparkId {
+// ---------------------------------------------------------------------------
+// SparkIdStr impls
+// ---------------------------------------------------------------------------
+
+impl SparkIdStr {
+    pub(crate) fn from_packed(value: u128) -> Self {
+        let mut out = [0u8; ID_LENGTH];
+        let mut shift = 122i32; // first index at bits 127..122
+        let mut i = 0;
+        while i < 21 {
+            out[i] = ALPHABET[((value >> shift as u32) & 0x3F) as usize];
+            shift -= 6;
+            i += 1;
+        }
+        Self(out)
+    }
+
+    fn as_str_inner(&self) -> &str {
+        // SAFETY: from_packed only produces bytes from ALPHABET, which are ASCII
+        // and therefore always valid UTF-8. Skips the redundant validation scan.
+        unsafe { core::str::from_utf8_unchecked(&self.0) }
+    }
+}
+
+impl Deref for SparkIdStr {
     type Target = str;
 
     fn deref(&self) -> &str {
-        self.as_str()
+        self.as_str_inner()
     }
 }
 
-impl AsRef<str> for SparkId {
+impl AsRef<str> for SparkIdStr {
     fn as_ref(&self) -> &str {
-        self.as_str()
+        self.as_str_inner()
     }
 }
 
-impl Borrow<str> for SparkId {
-    fn borrow(&self) -> &str {
-        self.as_str()
+impl fmt::Display for SparkIdStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str_inner())
     }
 }
 
-impl PartialEq<str> for SparkId {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
+impl fmt::Debug for SparkIdStr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SparkIdStr({})", self.as_str_inner())
     }
 }
 
-impl PartialEq<SparkId> for str {
-    fn eq(&self, other: &SparkId) -> bool {
-        self == other.as_str()
-    }
-}
-
-impl PartialEq<&str> for SparkId {
-    fn eq(&self, other: &&str) -> bool {
-        self.as_str() == *other
-    }
-}
-
-impl PartialEq<SparkId> for &str {
-    fn eq(&self, other: &SparkId) -> bool {
-        *self == other.as_str()
-    }
-}
+// ---------------------------------------------------------------------------
+// SparkId trait impls
+// ---------------------------------------------------------------------------
 
 impl fmt::Display for SparkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
+        f.write_str(&self.as_str())
     }
 }
 
 impl fmt::Debug for SparkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SparkId({})", self.as_str())
+        write!(f, "SparkId({})", &self.as_str())
     }
 }
 
 impl From<SparkId> for String {
     fn from(id: SparkId) -> String {
-        id.as_str().to_owned()
+        let s = id.as_str();
+        String::from(&*s)
     }
 }
 
@@ -275,7 +370,8 @@ impl FromStr for SparkId {
     /// Parse a string as a `SparkId`.
     ///
     /// Validates that the input is exactly 21 ASCII bytes, all from the
-    /// Base58 alphabet (`1-9`, `A-H`, `J-N`, `P-Z`, `a-k`, `m-z`).
+    /// Base58 alphabet (`1-9`, `A-H`, `J-N`, `P-Z`, `a-k`, `m-z`),
+    /// then packs the indices into a `u128`.
     ///
     /// # Examples
     ///
@@ -293,18 +389,32 @@ impl FromStr for SparkId {
                 kind: ParseErrorKind::InvalidLength(bytes.len()),
             });
         }
-        for (i, &b) in bytes.iter().enumerate() {
-            if !IS_BASE58[b as usize] {
+        let mut value: u128 = 0;
+        let mut position = 0;
+        while position < 20 {
+            let index = DECODE[bytes[position] as usize];
+            if index == INVALID_INDEX {
                 return Err(ParseSparkIdError {
                     kind: ParseErrorKind::InvalidChar {
-                        byte: b,
-                        position: i,
+                        byte: bytes[position],
+                        position,
                     },
                 });
             }
+            value = (value << 6) | index as u128;
+            position += 1;
         }
-        // Safety: length already validated above, unwrap cannot fail.
-        Ok(SparkId(bytes.try_into().unwrap()))
+        let index = DECODE[bytes[20] as usize];
+        if index == INVALID_INDEX {
+            return Err(ParseSparkIdError {
+                kind: ParseErrorKind::InvalidChar {
+                    byte: bytes[20],
+                    position: 20,
+                },
+            });
+        }
+        value = (value << 8) | (index as u128) << 2;
+        Ok(SparkId(value))
     }
 }
 
@@ -327,25 +437,31 @@ impl<'a> TryFrom<&'a str> for SparkId {
 /// across milliseconds by the timestamp prefix, and within the same millisecond
 /// by incrementing the counter.
 ///
+/// Internally, the generator maintains an index buffer where each element is a
+/// Base58 index (0-57) rather than an ASCII byte. The final `SparkId` is
+/// produced by packing these indices into a `u128`.
+///
 /// # Examples
 ///
 /// ```
 /// let mut gen = sparkid::IdGenerator::new();
 /// let id = gen.next_id();
-/// assert_eq!(id.len(), 21);
-/// assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
+/// let s = id.as_str();
+/// assert_eq!(s.len(), 21);
+/// assert!(s.chars().all(|c| c.is_ascii_alphanumeric()));
 /// ```
 pub struct IdGenerator {
     timestamp_cache_ms: u64,
-    // Full 21-byte ID buffer maintained in place.
-    // [0..8]  = timestamp prefix
-    // [8..13] = counter head
-    // [13]    = counter tail
-    // [14..21] = random tail (overwritten every call)
-    id_buffer: [u8; ID_LENGTH],
-    // Counter tail — kept as separate field for fast successor lookup
+    // Indices for timestamp (0..8) and counter head (8..13), used for carry
+    // propagation. The random tail and counter tail are not stored here.
+    index_buffer: [u8; ID_LENGTH],
+    // Counter tail — kept as separate field for fast increment
     counter_tail: u8,
-    // Pre-sampled random bytes (valid Base58 bytes after rejection sampling)
+    // Cached packed u128 of indices 0-12 (bits 127..50). Recomputed only when
+    // timestamp or counter head changes (~once per ms), avoiding 13 u128
+    // shift+OR operations on the hot path.
+    cached_prefix: u128,
+    // Pre-sampled random indices (valid Base58 indices after rejection sampling)
     random_buffer: Box<[u8]>,
     random_count: usize,
     random_position: usize,
@@ -363,8 +479,9 @@ impl IdGenerator {
     pub fn new() -> Self {
         IdGenerator {
             timestamp_cache_ms: 0,
-            id_buffer: [FIRST_BYTE; ID_LENGTH],
-            counter_tail: FIRST_BYTE,
+            index_buffer: [FIRST_INDEX; ID_LENGTH],
+            counter_tail: FIRST_INDEX,
+            cached_prefix: 0,
             random_buffer: vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice(),
             random_count: 0,
             random_position: 0,
@@ -388,13 +505,20 @@ impl IdGenerator {
     /// ```
     /// let mut gen = sparkid::IdGenerator::new();
     /// let id = gen.next_id();
-    /// assert_eq!(id.len(), 21);
+    /// let s = id.as_str();
+    /// assert_eq!(s.len(), 21);
     /// println!("{id}"); // no allocation
     /// ```
     #[cfg(feature = "std")]
     pub fn next_id(&mut self) -> SparkId {
-        self.advance(self.current_time_ms());
-        SparkId(self.id_buffer)
+        let random_position = self.prepare_next(self.current_time_ms());
+        // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
+        // and random_count <= random_buffer.len() (RANDOM_BATCH_SIZE).
+        let random = unsafe {
+            self.random_buffer
+                .get_unchecked(random_position..random_position + RANDOM_CHAR_COUNT)
+        };
+        SparkId(self.cached_prefix | pack_suffix(self.counter_tail, random))
     }
 
     /// Generates a unique, time-sortable, 21-char Base58 ID using the given
@@ -411,15 +535,24 @@ impl IdGenerator {
     /// ```
     /// let mut gen = sparkid::IdGenerator::new();
     /// let id = gen.next_id_at(1_700_000_000_000);
-    /// assert_eq!(id.len(), 21);
+    /// let s = id.as_str();
+    /// assert_eq!(s.len(), 21);
     /// ```
     pub fn next_id_at(&mut self, timestamp_ms: u64) -> SparkId {
-        self.advance(timestamp_ms);
-        SparkId(self.id_buffer)
+        let random_position = self.prepare_next(timestamp_ms);
+        // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
+        // and random_count <= random_buffer.len() (RANDOM_BATCH_SIZE).
+        let random = unsafe {
+            self.random_buffer
+                .get_unchecked(random_position..random_position + RANDOM_CHAR_COUNT)
+        };
+        SparkId(self.cached_prefix | pack_suffix(self.counter_tail, random))
     }
 
-    /// Advance internal state and fill id_buffer with the next ID.
-    fn advance(&mut self, timestamp: u64) {
+    /// Advance internal state for the next ID. Returns the random buffer
+    /// position for the 7 random tail indices.
+    #[inline(always)]
+    fn prepare_next(&mut self, timestamp: u64) -> usize {
         if timestamp > self.timestamp_cache_ms {
             // New millisecond (or first call): encode timestamp, seed counter.
             self.timestamp_cache_ms = timestamp;
@@ -427,25 +560,20 @@ impl IdGenerator {
             self.seed_counter();
         } else {
             // Same millisecond (or clock went backward): increment counter tail.
-            let next = SUCCESSOR[self.counter_tail as usize];
-            if next != 0 {
-                self.counter_tail = next;
+            if self.counter_tail < MAX_INDEX {
+                self.counter_tail += 1;
             } else {
                 self.increment_carry();
             }
         }
 
-        // Ensure random buffer has enough bytes for the tail.
+        // Ensure random buffer has enough indices for the tail.
         if self.random_position + RANDOM_CHAR_COUNT > self.random_count {
             self.refill_random();
         }
         let position = self.random_position;
         self.random_position = position + RANDOM_CHAR_COUNT;
-
-        // Hot path: only write counter tail (1 byte) + random (7 bytes).
-        // The prefix (8) and counter head (5) are already up to date in id_buffer.
-        self.id_buffer[COUNTER_TAIL_OFFSET] = self.counter_tail;
-        self.id_buffer[RANDOM_START_OFFSET..ID_LENGTH].copy_from_slice(&self.random_buffer[position..position + RANDOM_CHAR_COUNT]);
+        position
     }
 
     #[cfg(feature = "std")]
@@ -460,49 +588,53 @@ impl IdGenerator {
             .as_millis() as u64
     }
 
+    #[cold]
     fn encode_timestamp(&mut self, mut timestamp: u64) {
         let mut remainder: u64;
 
         remainder = timestamp % BASE; timestamp /= BASE;
-        let c7 = TIMESTAMP_LOOKUP[remainder as usize];
+        let c7 = remainder as u8;
         remainder = timestamp % BASE; timestamp /= BASE;
-        let c6 = TIMESTAMP_LOOKUP[remainder as usize];
+        let c6 = remainder as u8;
         remainder = timestamp % BASE; timestamp /= BASE;
-        let c5 = TIMESTAMP_LOOKUP[remainder as usize];
+        let c5 = remainder as u8;
         remainder = timestamp % BASE; timestamp /= BASE;
-        let c4 = TIMESTAMP_LOOKUP[remainder as usize];
+        let c4 = remainder as u8;
         remainder = timestamp % BASE; timestamp /= BASE;
-        let c3 = TIMESTAMP_LOOKUP[remainder as usize];
+        let c3 = remainder as u8;
         remainder = timestamp % BASE; timestamp /= BASE;
-        let c2 = TIMESTAMP_LOOKUP[remainder as usize];
+        let c2 = remainder as u8;
         remainder = timestamp % BASE; timestamp /= BASE;
-        let c1 = TIMESTAMP_LOOKUP[remainder as usize];
-        let c0 = TIMESTAMP_LOOKUP[timestamp as usize];
+        let c1 = remainder as u8;
+        let c0 = timestamp as u8;
 
-        self.id_buffer[0] = c0;
-        self.id_buffer[1] = c1;
-        self.id_buffer[2] = c2;
-        self.id_buffer[3] = c3;
-        self.id_buffer[4] = c4;
-        self.id_buffer[5] = c5;
-        self.id_buffer[6] = c6;
-        self.id_buffer[7] = c7;
+        self.index_buffer[0] = c0;
+        self.index_buffer[1] = c1;
+        self.index_buffer[2] = c2;
+        self.index_buffer[3] = c3;
+        self.index_buffer[4] = c4;
+        self.index_buffer[5] = c5;
+        self.index_buffer[6] = c6;
+        self.index_buffer[7] = c7;
     }
 
+    #[cold]
     fn refill_random(&mut self) {
         self.rng.fill_bytes(&mut self.raw_buffer);
         let mut count = 0;
         for &byte in &*self.raw_buffer {
-            let mapped = RANDOM_BYTE_LOOKUP[byte as usize];
-            if mapped != 0 {
-                self.random_buffer[count] = mapped;
-                count += 1;
-            }
+            let value = byte & 0x3F;
+            // Branchless: always write, only advance count when valid.
+            // Avoids branch mispredictions (~9.4% reject rate).
+            // Safe because count <= loop iteration < RANDOM_BATCH_SIZE.
+            self.random_buffer[count] = value;
+            count += (value < BASE_USIZE as u8) as usize;
         }
         self.random_count = count;
         self.random_position = 0;
     }
 
+    #[cold]
     fn seed_counter(&mut self) {
         if self.random_position + COUNTER_CHAR_COUNT > self.random_count {
             self.refill_random();
@@ -510,29 +642,29 @@ impl IdGenerator {
         let position = self.random_position;
         self.random_position = position + COUNTER_CHAR_COUNT;
 
-        self.id_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET]
+        self.index_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET]
             .copy_from_slice(&self.random_buffer[position..position + COUNTER_HEAD_CHAR_COUNT]);
         self.counter_tail = self.random_buffer[position + COUNTER_HEAD_CHAR_COUNT];
+        self.cached_prefix = pack_prefix(&self.index_buffer);
     }
 
-    /// Handle carry propagation through the counter head bytes.
+    /// Handle carry propagation through the counter head indices.
     ///
     /// Called when the counter tail overflows. Walks backward through
     /// the counter head (positions 12 down to 8). On full overflow
-    /// (all 6 counter chars maxed), bumps the timestamp forward by 1ms
+    /// (all 6 counter indices maxed), bumps the timestamp forward by 1ms
     /// and reseeds. Because the counter is randomly seeded each ms,
     /// overflow probability is n / 58^6 for n IDs generated in that ms.
+    #[cold]
     fn increment_carry(&mut self) {
         for i in (TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET).rev() {
-            let next = SUCCESSOR[self.id_buffer[i] as usize];
-            if next != 0 {
-                self.id_buffer[i] = next;
-                for j in (i + 1)..COUNTER_TAIL_OFFSET {
-                    self.id_buffer[j] = FIRST_BYTE;
-                }
-                self.counter_tail = FIRST_BYTE;
+            if self.index_buffer[i] < MAX_INDEX {
+                self.index_buffer[i] += 1;
+                self.counter_tail = FIRST_INDEX;
+                self.cached_prefix = pack_prefix(&self.index_buffer);
                 return;
             }
+            self.index_buffer[i] = FIRST_INDEX;
         }
         // Full overflow: bump timestamp, reseed.
         self.timestamp_cache_ms += 1;
@@ -554,12 +686,14 @@ impl IdGenerator {
         self.time_function = None;
     }
 
-    /// Read the prefix+counter_head buffer (first 13 bytes of id_buffer).
-    pub fn prefix_plus_counter_head(&self) -> &[u8; 13] {
-        self.id_buffer[..COUNTER_TAIL_OFFSET].try_into().unwrap()
+    /// Read the prefix+counter_head buffer (first 13 elements of index_buffer).
+    ///
+    /// Note: these are Base58 index values (0-57), not ASCII bytes.
+    pub fn timestamp_and_counter_head(&self) -> &[u8; 13] {
+        self.index_buffer[..COUNTER_TAIL_OFFSET].try_into().unwrap()
     }
 
-    /// Read the counter tail byte.
+    /// Read the counter tail index value.
     pub fn counter_tail(&self) -> u8 {
         self.counter_tail
     }
@@ -574,14 +708,14 @@ impl IdGenerator {
         self.seed_counter();
     }
 
-    /// Set the counter head bytes directly.
-    pub fn set_counter_head(&mut self, bytes: &[u8; 5]) {
-        self.id_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET].copy_from_slice(bytes);
+    /// Set the counter head indices directly (values 0-57).
+    pub fn set_counter_head(&mut self, indices: &[u8; 5]) {
+        self.index_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET].copy_from_slice(indices);
     }
 
-    /// Set the counter tail byte directly.
-    pub fn set_counter_tail(&mut self, byte: u8) {
-        self.counter_tail = byte;
+    /// Set the counter tail index directly (value 0-57).
+    pub fn set_counter_tail(&mut self, index: u8) {
+        self.counter_tail = index;
     }
 
     /// Set the cached timestamp.
@@ -609,7 +743,7 @@ impl IdGenerator {
         &self.random_buffer[..self.random_count]
     }
 
-    /// Read the count of valid random bytes.
+    /// Read the count of valid random indices.
     pub fn random_count(&self) -> usize {
         self.random_count
     }

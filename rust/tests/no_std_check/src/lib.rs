@@ -9,7 +9,7 @@
 extern crate alloc;
 
 use alloc::string::String;
-use sparkid::{IdGenerator, SparkId};
+use sparkid::{IdGenerator, SparkId, SparkIdStr};
 
 /// Exercises the full no_std public API surface at compile time.
 /// Never called — just needs to type-check.
@@ -22,9 +22,10 @@ fn verify_no_std_api() {
     let id: SparkId = gen.next_id_at(1_700_000_000_000);
 
     // SparkId core traits work without std
-    let _: &str = &id;           // Deref<Target = str>
-    let _: &str = id.as_ref();   // AsRef<str>
-    let _: String = id.into();   // Into<String> (alloc)
+    let s: SparkIdStr = id.as_str(); // SparkIdStr (stack-allocated)
+    let _: &str = &*s;            // Deref<Target = str> on SparkIdStr
+    let _: &str = s.as_ref();     // AsRef<str> on SparkIdStr
+    let _: String = id.into();    // Into<String> (alloc)
 
     // Display, Debug, Clone, Copy, Eq, Ord, Hash — all core traits
     let _ = core::format_args!("{id}");

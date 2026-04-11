@@ -34,7 +34,7 @@ fn current_time_ms() -> u64 {
 fn test_length() {
     let mut gen = IdGenerator::new();
     for _ in 0..1000 {
-        assert_eq!(gen.next_id().len(), 21);
+        assert_eq!(gen.next_id().as_str().len(), 21);
     }
 }
 
@@ -44,7 +44,7 @@ fn test_charset() {
     let mut gen = IdGenerator::new();
     for _ in 0..1000 {
         let id = gen.next_id();
-        for ch in id.chars() {
+        for ch in id.as_str().chars() {
             assert!(valid.contains(&ch), "invalid char: {ch}");
         }
     }
@@ -56,7 +56,7 @@ fn test_no_ambiguous_chars() {
     let mut gen = IdGenerator::new();
     for _ in 0..1000 {
         let id = gen.next_id();
-        for ch in id.chars() {
+        for ch in id.as_str().chars() {
             assert!(!forbidden.contains(&ch), "ambiguous char: {ch}");
         }
     }
@@ -68,7 +68,7 @@ fn test_all_alphanumeric_url_safe() {
     for _ in 0..1000 {
         let id = gen.next_id();
         assert!(
-            id.chars().all(|c| c.is_ascii_alphanumeric()),
+            id.as_str().chars().all(|c| c.is_ascii_alphanumeric()),
             "non-alphanumeric: {id}"
         );
     }
@@ -79,9 +79,10 @@ fn test_structure_parts() {
     let valid = valid_chars();
     let mut gen = IdGenerator::new();
     let id = gen.next_id();
-    let ts = &id[..8];
-    let counter = &id[8..14];
-    let random_tail = &id[14..];
+    let s = id.as_str();
+    let ts = &s[..8];
+    let counter = &s[8..14];
+    let random_tail = &s[14..];
     assert_eq!(ts.len(), 8);
     assert_eq!(counter.len(), 6);
     assert_eq!(random_tail.len(), 7);
@@ -99,7 +100,7 @@ fn test_prefix_encodes_current_millisecond() {
     let before = current_time_ms();
     let id = SparkId::new();
     let after = current_time_ms();
-    let decoded = decode_timestamp(&id[..8]);
+    let decoded = decode_timestamp(&id.as_str()[..8]);
     assert!(
         before <= decoded && decoded <= after,
         "decoded={decoded} not in [{before}, {after}]"
@@ -109,7 +110,7 @@ fn test_prefix_encodes_current_millisecond() {
 #[test]
 fn test_prefix_round_trips_through_decode() {
     let id = SparkId::new();
-    let decoded = decode_timestamp(&id[..8]);
+    let decoded = decode_timestamp(&id.as_str()[..8]);
     let ts_now = current_time_ms();
     assert!(
         (decoded as i64 - ts_now as i64).unsigned_abs() < 100,
@@ -123,7 +124,7 @@ fn test_prefix_increases_across_milliseconds() {
     let id_a = gen.next_id();
     std::thread::sleep(std::time::Duration::from_millis(20));
     let id_b = gen.next_id();
-    assert!(id_b[..8] > id_a[..8]);
+    assert!(id_b.as_str()[..8] > id_a.as_str()[..8]);
 }
 
 #[test]
@@ -132,7 +133,7 @@ fn test_prefix_is_lexicographically_sortable() {
     let mut prefixes = Vec::new();
     for _ in 0..20 {
         let id = gen.next_id();
-        prefixes.push(id[..8].to_string());
+        prefixes.push(id.as_str()[..8].to_string());
         // busy-wait to cross ms boundary
         let start = std::time::Instant::now();
         while start.elapsed().as_millis() < 1 {}
@@ -151,27 +152,26 @@ fn test_encode_boundary_values() {
     let mut gen = IdGenerator::new();
 
     gen.encode_timestamp_test(0);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], b"11111111");
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
 
     gen.encode_timestamp_test(1);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], b"11111112");
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 1]);
 
     gen.encode_timestamp_test(57);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], b"1111111z");
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 57]);
 
     gen.encode_timestamp_test(58);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], b"11111121");
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 1, 0]);
 }
 
 #[test]
 fn test_encode_monotonic_over_range() {
     let mut gen = IdGenerator::new();
     let ts = current_time_ms();
-    let mut prev = String::new();
+    let mut prev: Vec<u8> = Vec::new();
     for offset in 0..10_000u64 {
         gen.encode_timestamp_test(ts + offset);
-        let encoded =
-            std::str::from_utf8(&gen.prefix_plus_counter_head()[..8]).unwrap().to_string();
+        let encoded: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
         assert!(encoded > prev, "Not monotonic at offset {offset}");
         prev = encoded;
     }
@@ -182,8 +182,12 @@ fn test_encode_round_trip() {
     let mut gen = IdGenerator::new();
     let ts = current_time_ms();
     gen.encode_timestamp_test(ts);
-    let encoded = std::str::from_utf8(&gen.prefix_plus_counter_head()[..8]).unwrap();
-    assert_eq!(decode_timestamp(encoded), ts);
+    let prefix_indices = &gen.timestamp_and_counter_head()[..8];
+    let mut val: u64 = 0;
+    for &idx in prefix_indices {
+        val = val * 58 + idx as u64;
+    }
+    assert_eq!(val, ts);
 }
 
 #[test]
@@ -193,14 +197,11 @@ fn test_encode_digit_boundaries() {
         let boundary = 58u64.pow(power);
 
         gen.encode_timestamp_test(boundary - 1);
-        let before =
-            std::str::from_utf8(&gen.prefix_plus_counter_head()[..8]).unwrap().to_string();
+        let before: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
         gen.encode_timestamp_test(boundary);
-        let at =
-            std::str::from_utf8(&gen.prefix_plus_counter_head()[..8]).unwrap().to_string();
+        let at: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
         gen.encode_timestamp_test(boundary + 1);
-        let after =
-            std::str::from_utf8(&gen.prefix_plus_counter_head()[..8]).unwrap().to_string();
+        let after: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
 
         assert!(before < at, "boundary {boundary}: before >= at");
         assert!(at < after, "boundary {boundary}: at >= after");
@@ -210,9 +211,9 @@ fn test_encode_digit_boundaries() {
 #[test]
 fn test_encode_preserves_counter_head() {
     let mut gen = IdGenerator::new();
-    gen.set_counter_head(b"abcde");
+    gen.set_counter_head(&[33, 34, 35, 36, 37]); // a b c d e
     gen.encode_timestamp_test(12345);
-    assert_eq!(&gen.prefix_plus_counter_head()[8..], b"abcde");
+    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[33, 34, 35, 36, 37]);
 }
 
 // ---------------------------------------------------------------------------
@@ -241,10 +242,10 @@ fn test_counter_increments_within_same_ms() {
     gen.set_time_function(fixed_time);
 
     let ids: Vec<SparkId> = (0..500).map(|_| gen.next_id()).collect();
-    let ts0 = &ids[0][..8];
-    assert!(ids.iter().all(|id| &id[..8] == ts0), "all IDs should share timestamp");
+    let ts0 = ids[0].as_str()[..8].to_string();
+    assert!(ids.iter().all(|id| id.as_str()[..8] == ts0), "all IDs should share timestamp");
     for i in 1..ids.len() {
-        assert!(ids[i][8..14] > ids[i - 1][8..14]);
+        assert!(ids[i].as_str()[8..14] > ids[i - 1].as_str()[8..14]);
     }
 }
 
@@ -263,7 +264,7 @@ fn test_counter_randomly_seeded_each_ms() {
     let mut seeds = Vec::new();
     for _ in 0..10 {
         let id = gen.next_id();
-        seeds.push(id[8..14].to_string());
+        seeds.push(id.as_str()[8..14].to_string());
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
     let unique: HashSet<&String> = seeds.iter().collect();
@@ -277,25 +278,25 @@ fn test_counter_randomly_seeded_each_ms() {
 #[test]
 fn test_single_carry() {
     let mut gen = IdGenerator::new();
-    gen.set_counter_head(b"AAAAA");
-    gen.set_counter_tail(b'z');
+    gen.set_counter_head(&[9, 9, 9, 9, 9]); // AAAAA
+    gen.set_counter_tail(57); // z
 
     gen.increment_carry_test();
 
-    assert_eq!(gen.counter_tail(), b'1');
-    assert_eq!(&gen.prefix_plus_counter_head()[8..], b"AAAAB");
+    assert_eq!(gen.counter_tail(), 0); // '1' = index 0
+    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 9, 9, 9, 10]); // AAAAB
 }
 
 #[test]
 fn test_cascading_carry() {
     let mut gen = IdGenerator::new();
-    gen.set_counter_head(b"AAzzz");
-    gen.set_counter_tail(b'z');
+    gen.set_counter_head(&[9, 9, 57, 57, 57]); // AAzzz
+    gen.set_counter_tail(57); // z
 
     gen.increment_carry_test();
 
-    assert_eq!(gen.counter_tail(), b'1');
-    assert_eq!(&gen.prefix_plus_counter_head()[8..], b"AB111");
+    assert_eq!(gen.counter_tail(), 0); // '1' = index 0
+    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 10, 0, 0, 0]); // AB111
 }
 
 #[test]
@@ -304,8 +305,8 @@ fn test_full_overflow_bumps_timestamp() {
     let ts = current_time_ms();
     gen.set_timestamp_cache_ms(ts);
     gen.encode_timestamp_test(ts);
-    gen.set_counter_head(b"zzzzz");
-    gen.set_counter_tail(b'z');
+    gen.set_counter_head(&[57, 57, 57, 57, 57]); // zzzzz
+    gen.set_counter_tail(57); // z
 
     gen.increment_carry_test();
 
@@ -322,14 +323,14 @@ fn test_full_overflow_produces_valid_id() {
     gen.seed_counter_test();
 
     // Force counter to max
-    gen.set_counter_head(b"zzzzz");
-    gen.set_counter_tail(b'z');
+    gen.set_counter_head(&[57, 57, 57, 57, 57]); // zzzzz
+    gen.set_counter_tail(57); // z
 
     gen.increment_carry_test();
 
     let id = gen.next_id();
-    assert_eq!(id.len(), 21);
-    for ch in id.chars() {
+    assert_eq!(id.as_str().len(), 21);
+    for ch in id.as_str().chars() {
         assert!(valid.contains(&ch));
     }
 }
@@ -337,7 +338,7 @@ fn test_full_overflow_produces_valid_id() {
 #[test]
 fn test_carry_maintains_monotonicity() {
     let mut gen = IdGenerator::new();
-    gen.set_counter_tail(b'y'); // one before 'z'
+    gen.set_counter_tail(56); // y = index 56, one before z
     let ids: Vec<SparkId> = (0..5).map(|_| gen.next_id()).collect();
     for i in 1..ids.len() {
         assert!(ids[i] > ids[i - 1]);
@@ -348,10 +349,10 @@ fn test_carry_maintains_monotonicity() {
 fn test_carry_observable_in_burst() {
     let mut gen = IdGenerator::new();
     let ids: Vec<SparkId> = (0..200).map(|_| gen.next_id()).collect();
-    let ts = &ids[0][..8];
-    let same_ts: Vec<&SparkId> = ids.iter().filter(|id| &id[..8] == ts).collect();
+    let ts = ids[0].as_str()[..8].to_string();
+    let same_ts: Vec<&SparkId> = ids.iter().filter(|id| id.as_str()[..8] == ts).collect();
     for i in 1..same_ts.len() {
-        assert!(same_ts[i][8..14] > same_ts[i - 1][8..14]);
+        assert!(same_ts[i].as_str()[8..14] > same_ts[i - 1].as_str()[8..14]);
     }
 }
 
@@ -439,7 +440,7 @@ fn test_monotonic_despite_backward_clock() {
         id2 > id1,
         "Monotonicity must be preserved when clock goes backward"
     );
-    assert_eq!(&id2[..8], &id1[..8]); // Timestamp unchanged, counter incremented
+    assert_eq!(&id2.as_str()[..8], &id1.as_str()[..8]); // Timestamp unchanged, counter incremented
 }
 
 #[test]
@@ -461,7 +462,7 @@ fn test_clock_catches_up_after_regression() {
 
     assert!(id1 < id2);
     assert!(id2 < id3);
-    assert!(id3[..8] > id1[..8]); // New timestamp prefix
+    assert!(id3.as_str()[..8] > id1.as_str()[..8]); // New timestamp prefix
 }
 
 // ---------------------------------------------------------------------------
@@ -475,7 +476,7 @@ fn test_uniform_char_distribution() {
     let mut counts: HashMap<char, usize> = HashMap::new();
     for _ in 0..n {
         let id = gen.next_id();
-        for ch in id[14..].chars() {
+        for ch in id.as_str()[14..].chars() {
             *counts.entry(ch).or_insert(0) += 1;
         }
     }
@@ -501,7 +502,7 @@ fn test_all_58_chars_appear() {
     let mut seen: HashSet<char> = HashSet::new();
     for _ in 0..50_000 {
         let id = gen.next_id();
-        for ch in id[14..].chars() {
+        for ch in id.as_str()[14..].chars() {
             seen.insert(ch);
         }
     }
@@ -512,7 +513,7 @@ fn test_all_58_chars_appear() {
 fn test_random_tails_differ() {
     let mut gen = IdGenerator::new();
     let ids: Vec<SparkId> = (0..100).map(|_| gen.next_id()).collect();
-    let tails: HashSet<&str> = ids.iter().map(|id| &id[14..]).collect();
+    let tails: HashSet<String> = ids.iter().map(|id| id.as_str()[14..].to_string()).collect();
     assert_eq!(tails.len(), ids.len());
 }
 
@@ -522,7 +523,7 @@ fn test_no_modulo_bias() {
     let mut counts: HashMap<char, usize> = HashMap::new();
     for _ in 0..200_000 {
         let id = gen.next_id();
-        for ch in id[14..].chars() {
+        for ch in id.as_str()[14..].chars() {
             *counts.entry(ch).or_insert(0) += 1;
         }
     }
@@ -541,12 +542,10 @@ fn test_no_modulo_bias() {
 
 #[test]
 fn test_refill_produces_valid_chars() {
-    let valid = valid_chars();
     let mut gen = IdGenerator::new();
     gen.refill_random_test();
-    for &b in gen.random_buffer_valid() {
-        let ch = b as char;
-        assert!(valid.contains(&ch), "invalid char in random buf: {ch}");
+    for &index in gen.random_buffer_valid() {
+        assert!(index < 58, "invalid index in random buf: {index}");
     }
 }
 
@@ -598,8 +597,8 @@ fn test_sparkid_new_per_thread_isolation() {
 fn test_sparkid_new_returns_valid() {
     let valid = valid_chars();
     let id = SparkId::new();
-    assert_eq!(id.len(), 21);
-    for ch in id.chars() {
+    assert_eq!(id.as_str().len(), 21);
+    for ch in id.as_str().chars() {
         assert!(valid.contains(&ch));
     }
 }
@@ -608,7 +607,7 @@ fn test_sparkid_new_returns_valid() {
 fn test_id_generator_next_id() {
     let mut gen = IdGenerator::new();
     let id = gen.next_id();
-    assert_eq!(id.len(), 21);
+    assert_eq!(id.as_str().len(), 21);
 }
 
 #[test]
@@ -646,9 +645,9 @@ fn test_stress_2m_ids() {
 
     for i in 1..2_000_000 {
         let id = gen.next_id();
-        assert_eq!(id.len(), 21);
+        assert_eq!(id.as_str().len(), 21);
         assert!(id > prev, "Not monotonic at {i}");
-        for ch in id.chars() {
+        for ch in id.as_str().chars() {
             assert!(valid.contains(&ch));
         }
         if i < 500_000 {
@@ -665,31 +664,32 @@ fn test_stress_2m_ids() {
 #[test]
 fn test_sparkid_new() {
     let id = SparkId::new();
-    assert_eq!(id.len(), 21);
-    assert!(id.chars().all(|c| c.is_ascii_alphanumeric()));
+    assert_eq!(id.as_str().len(), 21);
+    assert!(id.as_str().chars().all(|c| c.is_ascii_alphanumeric()));
 }
 
 #[test]
 fn test_sparkid_display_no_alloc() {
     let id = SparkId::new();
     let displayed = format!("{id}");
-    assert_eq!(displayed, id.as_ref());
+    assert_eq!(displayed, id.to_string());
     assert_eq!(displayed.len(), 21);
 }
 
 #[test]
 fn test_sparkid_deref_to_str() {
     let id = SparkId::new();
-    let s: &str = &id;
-    assert_eq!(s.len(), 21);
-    assert_eq!(s, id.as_ref());
+    let s = id.as_str();
+    let slice: &str = &s;
+    assert_eq!(slice.len(), 21);
 }
 
 #[test]
 fn test_sparkid_into_string() {
     let id = SparkId::new();
+    let expected = id.to_string();
     let s: String = id.into();
-    assert_eq!(s, id.as_ref());
+    assert_eq!(s, expected);
 }
 
 #[test]
@@ -764,8 +764,8 @@ fn test_next_id_at_valid_format() {
     let ts = current_time_ms();
     for i in 0..1000 {
         let id = gen.next_id_at(ts + i);
-        assert_eq!(id.len(), 21);
-        for ch in id.chars() {
+        assert_eq!(id.as_str().len(), 21);
+        for ch in id.as_str().chars() {
             assert!(valid.contains(&ch), "invalid char: {ch}");
         }
     }
@@ -776,7 +776,7 @@ fn test_next_id_at_encodes_timestamp() {
     let mut gen = IdGenerator::new();
     let ts = 1_700_000_000_000u64;
     let id = gen.next_id_at(ts);
-    let decoded = decode_timestamp(&id[..8]);
+    let decoded = decode_timestamp(&id.as_str()[..8]);
     assert_eq!(decoded, ts);
 }
 
@@ -789,8 +789,8 @@ fn test_next_id_at_monotonic_same_ms() {
         assert!(ids[i] > ids[i - 1], "not monotonic at {i}");
     }
     // All share the same timestamp prefix
-    let prefix = &ids[0][..8];
-    assert!(ids.iter().all(|id| &id[..8] == prefix));
+    let prefix = ids[0].as_str()[..8].to_string();
+    assert!(ids.iter().all(|id| id.as_str()[..8] == prefix));
 }
 
 #[test]
@@ -812,7 +812,7 @@ fn test_next_id_at_counter_reseeds_each_ms() {
     let mut counters = Vec::new();
     for i in 0..20 {
         let id = gen.next_id_at(base + i);
-        counters.push(id[8..14].to_string());
+        counters.push(id.as_str()[8..14].to_string());
     }
     let unique: HashSet<&String> = counters.iter().collect();
     assert!(unique.len() > 1, "counter should reseed across ms");
@@ -826,7 +826,7 @@ fn test_next_id_at_handles_clock_regression() {
     // Clock goes backward
     let id2 = gen.next_id_at(ts - 100);
     assert!(id2 > id1, "must stay monotonic despite backward clock");
-    assert_eq!(&id2[..8], &id1[..8], "timestamp should not go backward");
+    assert_eq!(&id2.as_str()[..8], &id1.as_str()[..8], "timestamp should not go backward");
 }
 
 #[test]
@@ -846,11 +846,11 @@ fn test_next_id_at_matches_next_id_behavior() {
     let before = current_time_ms();
     let id = gen.next_id_at(before);
     let after = current_time_ms();
-    assert_eq!(id.len(), 21);
-    for ch in id.chars() {
+    assert_eq!(id.as_str().len(), 21);
+    for ch in id.as_str().chars() {
         assert!(valid.contains(&ch));
     }
-    let decoded = decode_timestamp(&id[..8]);
+    let decoded = decode_timestamp(&id.as_str()[..8]);
     assert!(
         before <= decoded && decoded <= after,
         "decoded={decoded} not in [{before}, {after}]"
@@ -876,14 +876,14 @@ fn test_parse_preserves_value() {
     let id = SparkId::new();
     let s: String = id.into();
     let parsed: SparkId = s.parse().unwrap();
-    assert_eq!(&*parsed, s);
+    assert_eq!(&*parsed.as_str(), s.as_str());
 }
 
 #[test]
 fn test_try_from_str() {
     let id = SparkId::new();
-    let s: &str = &id;
-    let parsed = SparkId::try_from(s).unwrap();
+    let s = id.as_str();
+    let parsed = SparkId::try_from(&*s).unwrap();
     assert_eq!(id, parsed);
 }
 
@@ -969,7 +969,7 @@ fn test_parse_all_valid_alphabet_chars() {
     let input: String = alphabet.chars().cycle().take(21).collect();
     let result = input.parse::<SparkId>();
     assert!(result.is_ok());
-    assert_eq!(&*result.unwrap(), input);
+    assert_eq!(&*result.unwrap().as_str(), input.as_str());
 }
 
 #[test]
@@ -1040,4 +1040,98 @@ fn test_timestamp_ms_known_value() {
     let id_str2 = "111111211111111111111";
     let id2: SparkId = id_str2.parse().unwrap();
     assert_eq!(id2.timestamp_ms(), 58);
+}
+
+// ---------------------------------------------------------------------------
+// Binary representation (u128 / bytes) round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_as_u128_round_trip() {
+    let mut gen = IdGenerator::new();
+    for _ in 0..100 {
+        let id = gen.next_id();
+        let value = id.as_u128();
+        let restored = SparkId::from_u128(value).unwrap();
+        assert_eq!(id, restored);
+    }
+}
+
+#[test]
+fn test_to_bytes_round_trip() {
+    let mut gen = IdGenerator::new();
+    for _ in 0..100 {
+        let id = gen.next_id();
+        let bytes = id.to_bytes();
+        let restored = SparkId::from_bytes(bytes).unwrap();
+        assert_eq!(id, restored);
+    }
+}
+
+#[test]
+fn test_u128_and_bytes_are_consistent() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let value = id.as_u128();
+    let bytes = id.to_bytes();
+    assert_eq!(bytes, value.to_be_bytes());
+}
+
+#[test]
+fn test_from_u128_preserves_string() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let s = id.as_str().to_string();
+    let restored = SparkId::from_u128(id.as_u128()).unwrap();
+    assert_eq!(&*restored.as_str(), &s);
+}
+
+#[test]
+fn test_from_bytes_preserves_string() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let s = id.as_str().to_string();
+    let restored = SparkId::from_bytes(id.to_bytes()).unwrap();
+    assert_eq!(&*restored.as_str(), &s);
+}
+
+#[test]
+fn test_from_u128_rejects_invalid_index() {
+    // Set a 6-bit field to 63 (> 57), which is an invalid Base58 index.
+    // Bits 127..122 hold the first index; set it to 63 (0x3F).
+    let bad_value: u128 = 0x3F << 122;
+    let result = SparkId::from_u128(bad_value);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("invalid 6-bit index"));
+}
+
+#[test]
+fn test_from_bytes_rejects_invalid_padding() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let mut bytes = id.to_bytes();
+    // Set lowest 2 bits (padding) to non-zero
+    bytes[15] |= 0x01;
+    let result = SparkId::from_bytes(bytes);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("padding"));
+}
+
+#[test]
+fn test_u128_preserves_ordering() {
+    let mut gen = IdGenerator::new();
+    let ids: Vec<SparkId> = (0..100).map(|_| gen.next_id()).collect();
+    for i in 1..ids.len() {
+        assert!(ids[i].as_u128() > ids[i - 1].as_u128());
+    }
+}
+
+#[test]
+fn test_from_u128_known_value() {
+    // All-ones ID: "111111111111111111111" → all indices are 0
+    let all_zeros: u128 = 0;
+    let id = SparkId::from_u128(all_zeros).unwrap();
+    assert_eq!(&*id.as_str(), "111111111111111111111");
 }

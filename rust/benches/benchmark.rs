@@ -31,8 +31,9 @@ fn verify() {
     let mut ids: Vec<SparkId> = Vec::with_capacity(50_000);
     for _ in 0..50_000 {
         let id = gen.next_id();
-        assert_eq!(id.len(), 21, "wrong length");
-        for ch in id.chars() {
+        let s = id.as_str();
+        assert_eq!(s.len(), 21, "wrong length");
+        for ch in s.chars() {
             assert!(valid_chars.contains(&ch), "invalid char: {ch}");
         }
         ids.push(id);
@@ -60,7 +61,7 @@ fn verify() {
     let before = current_time_ms();
     let id = gen3.next_id();
     let after = current_time_ms();
-    let decoded = decode_timestamp(&id[..8]);
+    let decoded = decode_timestamp(&id.as_str()[..8]);
     assert!(
         before <= decoded && decoded <= after,
         "timestamp out of range"
@@ -78,7 +79,7 @@ fn bench_generator(c: &mut Criterion) {
     }
 
     c.bench_function("sparkid::IdGenerator::next_id", |b| {
-        b.iter(|| gen.next_id())
+        b.iter(|| gen.next_id().as_str())
     });
 }
 
@@ -86,28 +87,44 @@ fn bench_thread_local(c: &mut Criterion) {
     for _ in 0..10_000 {
         let _ = SparkId::new();
     }
-    c.bench_function("sparkid::SparkId::new", |b| b.iter(SparkId::new));
+    c.bench_function("sparkid::SparkId::new", |b| {
+        b.iter(|| SparkId::new().as_str())
+    });
 }
 
 fn bench_comparison(c: &mut Criterion) {
     let mut group = c.benchmark_group("id_generators");
 
-    // sparkid — zero-alloc (returns Copy type, like Uuid/Ulid)
-    let mut sparkid_gen = IdGenerator::new();
-    group.bench_function("sparkid", |b| b.iter(|| sparkid_gen.next_id()));
+    // All benchmarks include string materialisation for apples-to-apples comparison.
+    // sparkid: as_str() returns stack-allocated SparkIdStr (zero heap alloc)
+    // uuid: encode_lower() writes into a stack buffer (zero heap alloc)
+    // nanoid/ulid: no zero-alloc API, so .to_string() / nanoid!() is their best
 
-    // uuid — returns Copy type Uuid, then .to_string() for fair comparison
+    let mut sparkid_gen = IdGenerator::new();
+    group.bench_function("sparkid", |b| {
+        b.iter(|| sparkid_gen.next_id().as_str())
+    });
+
     group.bench_function("uuid_v4", |b| {
-        b.iter(|| uuid::Uuid::new_v4().to_string())
+        b.iter(|| {
+            let mut buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+            uuid::Uuid::new_v4().as_hyphenated().encode_lower(&mut buf);
+            buf
+        })
     });
 
     group.bench_function("uuid_v7", |b| {
-        b.iter(|| uuid::Uuid::now_v7().to_string())
+        b.iter(|| {
+            let mut buf = [0u8; uuid::fmt::Hyphenated::LENGTH];
+            uuid::Uuid::now_v7().as_hyphenated().encode_lower(&mut buf);
+            buf
+        })
     });
 
     group.bench_function("nanoid", |b| b.iter(|| nanoid::nanoid!()));
 
     // ulid (monotonic — fair comparison since sparkid is monotonic)
+    // No zero-alloc string API; .to_string() is the best available
     let mut ulid_gen = ulid::Generator::new();
     group.bench_function("ulid", |b| {
         b.iter(|| ulid_gen.generate().unwrap().to_string())
@@ -125,5 +142,15 @@ fn bench_comparison(c: &mut Criterion) {
     println!("  ulid:    {}", ulid::Ulid::new());
 }
 
-criterion_group!(benches, bench_generator, bench_thread_local, bench_comparison);
+fn bench_parse(c: &mut Criterion) {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let id_string = id.to_string();
+
+    c.bench_function("sparkid::SparkId::from_str", |b| {
+        b.iter(|| id_string.parse::<SparkId>().unwrap())
+    });
+}
+
+criterion_group!(benches, bench_generator, bench_thread_local, bench_parse, bench_comparison);
 criterion_main!(benches);
