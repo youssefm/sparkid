@@ -27,20 +27,6 @@ let s: &str = &id;             // Deref to &str, zero-cost
 let owned: String = id.into(); // Into<String> when needed
 ```
 
-### Extract timestamp
-
-```rust
-use sparkid::SparkId;
-
-let id = SparkId::new();
-
-// As milliseconds since epoch (available in no_std)
-let ms = id.timestamp_ms();
-
-// As SystemTime (requires std)
-let ts = id.timestamp();
-```
-
 ## Properties
 
 | Property | Value |
@@ -67,7 +53,7 @@ Each ID is composed of two parts:
 
 ## `SparkId` type
 
-`SparkId` is a stack-allocated, `Copy` type — no heap allocation on creation. It implements `Deref<Target = str>`, `Display`, `Ord`, `Hash`, and `Into<String>`, so it works anywhere a string is expected.
+`SparkId` is a stack-allocated, `Copy` type — no heap allocation on creation. It implements `Deref<Target = str>`, `Display`, `Ord`, `Hash`, `FromStr`, and `Into<String>`, so it works anywhere a string is expected.
 
 ```rust
 use sparkid::SparkId;
@@ -77,6 +63,32 @@ let b = SparkId::new();
 assert!(b > a);                      // Ord — monotonically increasing
 println!("{a}");                      // Display — no allocation
 let set: std::collections::HashSet<SparkId> = [a, b].into(); // Hash
+```
+
+### Parse from string
+
+```rust
+use sparkid::SparkId;
+
+let id = SparkId::new();
+let parsed: SparkId = id.to_string().parse().unwrap();
+assert_eq!(id, parsed);
+```
+
+Parsing validates that the input is exactly 21 characters and all characters are in the Base58 alphabet. Returns a `ParseSparkIdError` on failure.
+
+### Extract timestamp
+
+```rust
+use sparkid::SparkId;
+
+let id = SparkId::new();
+
+// As milliseconds since epoch (available in no_std)
+let ms = id.timestamp_ms();
+
+// As SystemTime (requires std)
+let ts = id.timestamp();
 ```
 
 ## Ordering guarantees
