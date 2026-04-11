@@ -57,22 +57,15 @@ const DECODE: [u8; 256] = {
 /// The last index occupies the top 6 bits of the final byte, with 2 padding
 /// bits set to zero.
 fn pack_indices(indices: &[u8; ID_LENGTH]) -> u128 {
-    let mut out = [0u8; PACKED_BYTE_COUNT];
-    let mut character_index = 0usize;
-    let mut byte_index = 0usize;
-    while byte_index < 15 {
-        let packed = (indices[character_index] as u32) << 18
-            | (indices[character_index + 1] as u32) << 12
-            | (indices[character_index + 2] as u32) << 6
-            | indices[character_index + 3] as u32;
-        out[byte_index] = (packed >> 16) as u8;
-        out[byte_index + 1] = (packed >> 8) as u8;
-        out[byte_index + 2] = packed as u8;
-        character_index += 4;
-        byte_index += 3;
+    let mut value: u128 = 0;
+    let mut i = 0;
+    while i < 20 {
+        value = (value << 6) | indices[i] as u128;
+        i += 1;
     }
-    out[15] = indices[20] << 2;
-    u128::from_be_bytes(out)
+    // Last index + 2 padding bits
+    value = (value << 8) | (indices[20] as u128) << 2;
+    value
 }
 
 /// Unpack a `u128` into 21 ASCII Base58 characters.
@@ -81,22 +74,14 @@ fn pack_indices(indices: &[u8; ID_LENGTH]) -> u128 {
 /// 4 characters via the `ALPHABET` table, and the final byte's top 6 bits
 /// yield the 21st character.
 fn unpack_to_ascii(value: u128) -> [u8; ID_LENGTH] {
-    let bin = value.to_be_bytes();
     let mut out = [0u8; ID_LENGTH];
-    let mut character_index = 0usize;
-    let mut byte_index = 0usize;
-    while byte_index < 15 {
-        let packed = (bin[byte_index] as u32) << 16
-            | (bin[byte_index + 1] as u32) << 8
-            | bin[byte_index + 2] as u32;
-        out[character_index] = ALPHABET[((packed >> 18) & 0x3F) as usize];
-        out[character_index + 1] = ALPHABET[((packed >> 12) & 0x3F) as usize];
-        out[character_index + 2] = ALPHABET[((packed >> 6) & 0x3F) as usize];
-        out[character_index + 3] = ALPHABET[(packed & 0x3F) as usize];
-        character_index += 4;
-        byte_index += 3;
+    let mut shift = 122i32; // first index at bits 127..122
+    let mut i = 0;
+    while i < 21 {
+        out[i] = ALPHABET[((value >> shift as u32) & 0x3F) as usize];
+        shift -= 6;
+        i += 1;
     }
-    out[20] = ALPHABET[((bin[15] >> 2) & 0x3F) as usize];
     out
 }
 
@@ -229,67 +214,28 @@ impl SparkId {
     pub fn from_bytes(bytes: [u8; PACKED_BYTE_COUNT]) -> Result<Self, ParseSparkIdError> {
         let value = u128::from_be_bytes(bytes);
 
-        // Validate padding: the last 2 bits of the final byte must be zero.
-        if bytes[15] & 0x03 != 0 {
+        // Validate padding: the bottom 2 bits must be zero.
+        if value & 0x03 != 0 {
             return Err(ParseSparkIdError {
                 kind: ParseErrorKind::InvalidPadding,
             });
         }
 
         // Validate all 21 six-bit fields are in [0, 57].
-        // Process groups of 4 indices from each 3-byte chunk.
-        let mut byte_position = 0usize;
-        while byte_position < 15 {
-            let packed = (bytes[byte_position] as u32) << 16
-                | (bytes[byte_position + 1] as u32) << 8
-                | bytes[byte_position + 2] as u32;
-            let index_0 = ((packed >> 18) & 0x3F) as u8;
-            let index_1 = ((packed >> 12) & 0x3F) as u8;
-            let index_2 = ((packed >> 6) & 0x3F) as u8;
-            let index_3 = (packed & 0x3F) as u8;
-            if index_0 > MAX_INDEX {
+        let mut shift = 122i32;
+        let mut char_index = 0usize;
+        while char_index < ID_LENGTH {
+            let index = ((value >> shift as u32) & 0x3F) as u8;
+            if index > MAX_INDEX {
                 return Err(ParseSparkIdError {
                     kind: ParseErrorKind::InvalidBinaryIndex {
-                        value: index_0,
-                        byte_position,
+                        value: index,
+                        byte_position: (char_index * 6) / 8,
                     },
                 });
             }
-            if index_1 > MAX_INDEX {
-                return Err(ParseSparkIdError {
-                    kind: ParseErrorKind::InvalidBinaryIndex {
-                        value: index_1,
-                        byte_position,
-                    },
-                });
-            }
-            if index_2 > MAX_INDEX {
-                return Err(ParseSparkIdError {
-                    kind: ParseErrorKind::InvalidBinaryIndex {
-                        value: index_2,
-                        byte_position,
-                    },
-                });
-            }
-            if index_3 > MAX_INDEX {
-                return Err(ParseSparkIdError {
-                    kind: ParseErrorKind::InvalidBinaryIndex {
-                        value: index_3,
-                        byte_position,
-                    },
-                });
-            }
-            byte_position += 3;
-        }
-        // Validate the 21st index from the top 6 bits of byte 15.
-        let last_index = (bytes[15] >> 2) & 0x3F;
-        if last_index > MAX_INDEX {
-            return Err(ParseSparkIdError {
-                kind: ParseErrorKind::InvalidBinaryIndex {
-                    value: last_index,
-                    byte_position: 15,
-                },
-            });
+            shift -= 6;
+            char_index += 1;
         }
 
         Ok(SparkId(value))
@@ -306,20 +252,17 @@ impl SparkId {
     /// Unpacks the first 8 Base58 indices from the binary representation
     /// and reconstructs the original timestamp via Horner's method.
     pub fn timestamp_ms(&self) -> u64 {
-        let bin = self.0.to_be_bytes();
-        // Unpack the first 8 indices from the first 6 bytes (8 indices × 6 bits = 48 bits).
-        // Bytes 0..5 hold indices 0..7 in 6-bit groups.
-        let packed_0 = (bin[0] as u32) << 16 | (bin[1] as u32) << 8 | bin[2] as u32;
-        let packed_1 = (bin[3] as u32) << 16 | (bin[4] as u32) << 8 | bin[5] as u32;
-
-        let index_0 = ((packed_0 >> 18) & 0x3F) as u64;
-        let index_1 = ((packed_0 >> 12) & 0x3F) as u64;
-        let index_2 = ((packed_0 >> 6) & 0x3F) as u64;
-        let index_3 = (packed_0 & 0x3F) as u64;
-        let index_4 = ((packed_1 >> 18) & 0x3F) as u64;
-        let index_5 = ((packed_1 >> 12) & 0x3F) as u64;
-        let index_6 = ((packed_1 >> 6) & 0x3F) as u64;
-        let index_7 = (packed_1 & 0x3F) as u64;
+        // Extract the first 8 six-bit indices directly from the u128.
+        // Index 0 is at bits 127..122, index 1 at 121..116, etc.
+        let v = self.0;
+        let index_0 = ((v >> 122) & 0x3F) as u64;
+        let index_1 = ((v >> 116) & 0x3F) as u64;
+        let index_2 = ((v >> 110) & 0x3F) as u64;
+        let index_3 = ((v >> 104) & 0x3F) as u64;
+        let index_4 = ((v >> 98) & 0x3F) as u64;
+        let index_5 = ((v >> 92) & 0x3F) as u64;
+        let index_6 = ((v >> 86) & 0x3F) as u64;
+        let index_7 = ((v >> 80) & 0x3F) as u64;
 
         // Horner's method: val = i0*58^7 + i1*58^6 + ... + i7*58^0
         let mut value: u64 = index_0;
