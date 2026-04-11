@@ -68,6 +68,41 @@ fn pack_indices(indices: &[u8; ID_LENGTH]) -> u128 {
     value
 }
 
+/// Pack the first 13 indices (timestamp + counter head) into the upper
+/// portion of a `u128`, occupying bits 127..50 with bits 49..0 zeroed.
+///
+/// Used to cache the slow-changing prefix so the hot path only packs the
+/// 8 fast-changing suffix indices (counter tail + random) using `u64`.
+fn pack_prefix(indices: &[u8; ID_LENGTH]) -> u128 {
+    let mut value: u128 = 0;
+    let mut i = 0;
+    while i < RANDOM_START_OFFSET - 1 {
+        value = (value << 6) | indices[i] as u128;
+        i += 1;
+    }
+    // Shift to position: 13 indices × 6 bits = 78 bits of data.
+    // The lowest index (index 12) needs to land at bits 55..50,
+    // so shift left by 50.
+    value << 50
+}
+
+/// Pack the suffix (counter tail + 7 random indices) into the lower 50 bits
+/// of a `u128`. Uses `u64` arithmetic since the result fits in 50 bits,
+/// avoiding expensive u128 shift/OR chains on the hot path.
+#[inline(always)]
+fn pack_suffix(counter_tail: u8, random: &[u8]) -> u128 {
+    let mut value: u64 = counter_tail as u64;
+    value = (value << 6) | random[0] as u64;
+    value = (value << 6) | random[1] as u64;
+    value = (value << 6) | random[2] as u64;
+    value = (value << 6) | random[3] as u64;
+    value = (value << 6) | random[4] as u64;
+    value = (value << 6) | random[5] as u64;
+    // Last index + 2 padding bits
+    value = (value << 8) | (random[6] as u64) << 2;
+    value as u128
+}
+
 /// Unpack a `u128` into 21 ASCII Base58 characters.
 ///
 /// Reverses the packing performed by [`pack_indices`]: every 3 bytes yield
@@ -433,14 +468,15 @@ impl<'a> TryFrom<&'a str> for SparkId {
 /// ```
 pub struct IdGenerator {
     timestamp_cache_ms: u64,
-    // Full 21-element index buffer maintained in place.
-    // [0..8]  = timestamp prefix (Base58 indices)
-    // [8..13] = counter head (Base58 indices)
-    // [13]    = counter tail (Base58 index)
-    // [14..21] = random tail (Base58 indices, overwritten every call)
+    // Indices for timestamp (0..8) and counter head (8..13), used for carry
+    // propagation. The random tail and counter tail are not stored here.
     index_buffer: [u8; ID_LENGTH],
     // Counter tail — kept as separate field for fast increment
     counter_tail: u8,
+    // Cached packed u128 of indices 0-12 (bits 127..50). Recomputed only when
+    // timestamp or counter head changes (~once per ms), avoiding 13 u128
+    // shift+OR operations on the hot path.
+    cached_prefix: u128,
     // Pre-sampled random indices (valid Base58 indices after rejection sampling)
     random_buffer: Box<[u8]>,
     random_count: usize,
@@ -461,6 +497,7 @@ impl IdGenerator {
             timestamp_cache_ms: 0,
             index_buffer: [FIRST_INDEX; ID_LENGTH],
             counter_tail: FIRST_INDEX,
+            cached_prefix: 0,
             random_buffer: vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice(),
             random_count: 0,
             random_position: 0,
@@ -490,8 +527,14 @@ impl IdGenerator {
     /// ```
     #[cfg(feature = "std")]
     pub fn next_id(&mut self) -> SparkId {
-        self.advance(self.current_time_ms());
-        SparkId(pack_indices(&self.index_buffer))
+        let random_position = self.advance(self.current_time_ms());
+        SparkId(
+            self.cached_prefix
+                | pack_suffix(
+                    self.counter_tail,
+                    &self.random_buffer[random_position..random_position + RANDOM_CHAR_COUNT],
+                ),
+        )
     }
 
     /// Generates a unique, time-sortable, 21-char Base58 ID using the given
@@ -512,12 +555,21 @@ impl IdGenerator {
     /// assert_eq!(s.len(), 21);
     /// ```
     pub fn next_id_at(&mut self, timestamp_ms: u64) -> SparkId {
-        self.advance(timestamp_ms);
-        SparkId(pack_indices(&self.index_buffer))
+        let random_position = self.advance(timestamp_ms);
+        SparkId(
+            self.cached_prefix
+                | pack_suffix(
+                    self.counter_tail,
+                    &self.random_buffer
+                        [random_position..random_position + RANDOM_CHAR_COUNT],
+                ),
+        )
     }
 
-    /// Advance internal state and fill index_buffer with the next ID.
-    fn advance(&mut self, timestamp: u64) {
+    /// Advance internal state for the next ID. Returns the random buffer
+    /// position for the 7 random tail indices.
+    #[inline(always)]
+    fn advance(&mut self, timestamp: u64) -> usize {
         if timestamp > self.timestamp_cache_ms {
             // New millisecond (or first call): encode timestamp, seed counter.
             self.timestamp_cache_ms = timestamp;
@@ -538,12 +590,7 @@ impl IdGenerator {
         }
         let position = self.random_position;
         self.random_position = position + RANDOM_CHAR_COUNT;
-
-        // Hot path: only write counter tail (1 index) + random (7 indices).
-        // The prefix (8) and counter head (5) are already up to date in index_buffer.
-        self.index_buffer[COUNTER_TAIL_OFFSET] = self.counter_tail;
-        self.index_buffer[RANDOM_START_OFFSET..ID_LENGTH]
-            .copy_from_slice(&self.random_buffer[position..position + RANDOM_CHAR_COUNT]);
+        position
     }
 
     #[cfg(feature = "std")]
@@ -592,10 +639,11 @@ impl IdGenerator {
         let mut count = 0;
         for &byte in &*self.raw_buffer {
             let value = byte & 0x3F;
-            if value < BASE_USIZE as u8 {
-                self.random_buffer[count] = value;
-                count += 1;
-            }
+            // Branchless: always write, only advance count when valid.
+            // Avoids branch mispredictions (~9.4% reject rate).
+            // Safe because count <= loop iteration < RANDOM_BATCH_SIZE.
+            self.random_buffer[count] = value;
+            count += (value < BASE_USIZE as u8) as usize;
         }
         self.random_count = count;
         self.random_position = 0;
@@ -611,6 +659,7 @@ impl IdGenerator {
         self.index_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET]
             .copy_from_slice(&self.random_buffer[position..position + COUNTER_HEAD_CHAR_COUNT]);
         self.counter_tail = self.random_buffer[position + COUNTER_HEAD_CHAR_COUNT];
+        self.cached_prefix = pack_prefix(&self.index_buffer);
     }
 
     /// Handle carry propagation through the counter head indices.
@@ -628,6 +677,7 @@ impl IdGenerator {
                     self.index_buffer[j] = FIRST_INDEX;
                 }
                 self.counter_tail = FIRST_INDEX;
+                self.cached_prefix = pack_prefix(&self.index_buffer);
                 return;
             }
         }
