@@ -143,10 +143,10 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" python/pyproject.toml
           sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" rust/Cargo.toml
 
-          # Build (updates lock files)
-          cd js && npm ci && npm run build && cd ..
-          cd python && uv build && cd ..
-          cd rust && cargo build --release && cd ..
+          # Update lock files
+          cd js && npm install --package-lock-only && cd ..
+          cd python && uv lock && cd ..
+          cd rust && cargo generate-lockfile && cd ..
 
           # Commit, tag, push
           git config user.name "github-actions[bot]"
