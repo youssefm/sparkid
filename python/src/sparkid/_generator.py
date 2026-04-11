@@ -190,13 +190,12 @@ class IdGenerator:
             nxt = successor[buf[i]]
             if nxt >= 0:
                 buf[i] = nxt
-                for j in range(i + 1, _COUNTER_HEAD_CHAR_COUNT):
-                    buf[j] = _FIRST_BYTE
                 self._counter_tail = _FIRST_CHAR
                 self._prefix_plus_counter_head = self._prefix_plus_counter_head[
                     :_TIMESTAMP_CHAR_COUNT
                 ] + buf.decode("ascii")
                 return
+            buf[i] = _FIRST_BYTE
         # Overflow: bump timestamp, reseed.
         self._timestamp_cache_ms += 1
         self._encode_timestamp(self._timestamp_cache_ms)

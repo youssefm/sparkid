@@ -675,13 +675,11 @@ impl IdGenerator {
         for i in (TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET).rev() {
             if self.index_buffer[i] < MAX_INDEX {
                 self.index_buffer[i] += 1;
-                for j in (i + 1)..COUNTER_TAIL_OFFSET {
-                    self.index_buffer[j] = FIRST_INDEX;
-                }
                 self.counter_tail = FIRST_INDEX;
                 self.cached_prefix = pack_prefix(&self.index_buffer);
                 return;
             }
+            self.index_buffer[i] = FIRST_INDEX;
         }
         // Full overflow: bump timestamp, reseed.
         self.timestamp_cache_ms += 1;
