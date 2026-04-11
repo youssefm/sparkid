@@ -353,9 +353,9 @@ impl SparkId {
 
 impl SparkIdStr {
     fn as_str_inner(&self) -> &str {
-        // All bytes are ASCII Base58 characters, so this is always valid UTF-8.
-        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII.
-        core::str::from_utf8(&self.0).expect("SparkIdStr contains invalid UTF-8")
+        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
+        // and therefore always valid UTF-8. Skips the redundant validation scan.
+        unsafe { core::str::from_utf8_unchecked(&self.0) }
     }
 }
 
