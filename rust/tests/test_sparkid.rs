@@ -1041,3 +1041,97 @@ fn test_timestamp_ms_known_value() {
     let id2: SparkId = id_str2.parse().unwrap();
     assert_eq!(id2.timestamp_ms(), 58);
 }
+
+// ---------------------------------------------------------------------------
+// Binary representation (u128 / bytes) round-trip
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_as_u128_round_trip() {
+    let mut gen = IdGenerator::new();
+    for _ in 0..100 {
+        let id = gen.next_id();
+        let value = id.as_u128();
+        let restored = SparkId::from_u128(value).unwrap();
+        assert_eq!(id, restored);
+    }
+}
+
+#[test]
+fn test_to_bytes_round_trip() {
+    let mut gen = IdGenerator::new();
+    for _ in 0..100 {
+        let id = gen.next_id();
+        let bytes = id.to_bytes();
+        let restored = SparkId::from_bytes(bytes).unwrap();
+        assert_eq!(id, restored);
+    }
+}
+
+#[test]
+fn test_u128_and_bytes_are_consistent() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let value = id.as_u128();
+    let bytes = id.to_bytes();
+    assert_eq!(bytes, value.to_be_bytes());
+}
+
+#[test]
+fn test_from_u128_preserves_string() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let s = id.as_str().to_string();
+    let restored = SparkId::from_u128(id.as_u128()).unwrap();
+    assert_eq!(&*restored.as_str(), &s);
+}
+
+#[test]
+fn test_from_bytes_preserves_string() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let s = id.as_str().to_string();
+    let restored = SparkId::from_bytes(id.to_bytes()).unwrap();
+    assert_eq!(&*restored.as_str(), &s);
+}
+
+#[test]
+fn test_from_u128_rejects_invalid_index() {
+    // Set a 6-bit field to 63 (> 57), which is an invalid Base58 index.
+    // Bits 127..122 hold the first index; set it to 63 (0x3F).
+    let bad_value: u128 = 0x3F << 122;
+    let result = SparkId::from_u128(bad_value);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("invalid 6-bit index"));
+}
+
+#[test]
+fn test_from_bytes_rejects_invalid_padding() {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let mut bytes = id.to_bytes();
+    // Set lowest 2 bits (padding) to non-zero
+    bytes[15] |= 0x01;
+    let result = SparkId::from_bytes(bytes);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(err.to_string().contains("padding"));
+}
+
+#[test]
+fn test_u128_preserves_ordering() {
+    let mut gen = IdGenerator::new();
+    let ids: Vec<SparkId> = (0..100).map(|_| gen.next_id()).collect();
+    for i in 1..ids.len() {
+        assert!(ids[i].as_u128() > ids[i - 1].as_u128());
+    }
+}
+
+#[test]
+fn test_from_u128_known_value() {
+    // All-ones ID: "111111111111111111111" → all indices are 0
+    let all_zeros: u128 = 0;
+    let id = SparkId::from_u128(all_zeros).unwrap();
+    assert_eq!(&*id.as_str(), "111111111111111111111");
+}
