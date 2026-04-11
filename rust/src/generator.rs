@@ -353,8 +353,9 @@ impl fmt::Debug for SparkIdStr {
 impl fmt::Display for SparkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ascii = unpack_to_ascii(self.0);
-        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII.
-        let s = core::str::from_utf8(&ascii).expect("SparkId produced invalid UTF-8");
+        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
+        // and therefore always valid UTF-8.
+        let s = unsafe { core::str::from_utf8_unchecked(&ascii) };
         f.write_str(s)
     }
 }
@@ -362,7 +363,9 @@ impl fmt::Display for SparkId {
 impl fmt::Debug for SparkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let ascii = unpack_to_ascii(self.0);
-        let s = core::str::from_utf8(&ascii).expect("SparkId produced invalid UTF-8");
+        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
+        // and therefore always valid UTF-8.
+        let s = unsafe { core::str::from_utf8_unchecked(&ascii) };
         write!(f, "SparkId({s})")
     }
 }
@@ -370,8 +373,9 @@ impl fmt::Debug for SparkId {
 impl From<SparkId> for String {
     fn from(id: SparkId) -> String {
         let ascii = unpack_to_ascii(id.0);
-        // SAFETY: all bytes are valid ASCII from ALPHABET.
-        String::from_utf8(ascii.to_vec()).expect("SparkId produced invalid UTF-8")
+        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
+        // and therefore always valid UTF-8.
+        unsafe { String::from_utf8_unchecked(ascii.to_vec()) }
     }
 }
 
