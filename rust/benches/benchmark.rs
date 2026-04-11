@@ -79,7 +79,7 @@ fn bench_generator(c: &mut Criterion) {
     }
 
     c.bench_function("sparkid::IdGenerator::next_id", |b| {
-        b.iter(|| gen.next_id())
+        b.iter(|| gen.next_id().as_str())
     });
 }
 
@@ -87,7 +87,9 @@ fn bench_thread_local(c: &mut Criterion) {
     for _ in 0..10_000 {
         let _ = SparkId::new();
     }
-    c.bench_function("sparkid::SparkId::new", |b| b.iter(SparkId::new));
+    c.bench_function("sparkid::SparkId::new", |b| {
+        b.iter(|| SparkId::new().as_str())
+    });
 }
 
 fn bench_comparison(c: &mut Criterion) {
