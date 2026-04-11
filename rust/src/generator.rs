@@ -526,7 +526,7 @@ impl IdGenerator {
     /// ```
     #[cfg(feature = "std")]
     pub fn next_id(&mut self) -> SparkId {
-        let random_position = self.advance(self.current_time_ms());
+        let random_position = self.prepare_next(self.current_time_ms());
         // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
         // and random_count <= random_buffer.len() (RANDOM_BATCH_SIZE).
         let random = unsafe {
@@ -554,7 +554,7 @@ impl IdGenerator {
     /// assert_eq!(s.len(), 21);
     /// ```
     pub fn next_id_at(&mut self, timestamp_ms: u64) -> SparkId {
-        let random_position = self.advance(timestamp_ms);
+        let random_position = self.prepare_next(timestamp_ms);
         // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
         // and random_count <= random_buffer.len() (RANDOM_BATCH_SIZE).
         let random = unsafe {
@@ -567,7 +567,7 @@ impl IdGenerator {
     /// Advance internal state for the next ID. Returns the random buffer
     /// position for the 7 random tail indices.
     #[inline(always)]
-    fn advance(&mut self, timestamp: u64) -> usize {
+    fn prepare_next(&mut self, timestamp: u64) -> usize {
         if timestamp > self.timestamp_cache_ms {
             // New millisecond (or first call): encode timestamp, seed counter.
             self.timestamp_cache_ms = timestamp;
@@ -704,7 +704,7 @@ impl IdGenerator {
     /// Read the prefix+counter_head buffer (first 13 elements of index_buffer).
     ///
     /// Note: these are Base58 index values (0-57), not ASCII bytes.
-    pub fn prefix_plus_counter_head(&self) -> &[u8; 13] {
+    pub fn timestamp_and_counter_head(&self) -> &[u8; 13] {
         self.index_buffer[..COUNTER_TAIL_OFFSET].try_into().unwrap()
     }
 

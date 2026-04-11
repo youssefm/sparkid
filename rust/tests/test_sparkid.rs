@@ -152,16 +152,16 @@ fn test_encode_boundary_values() {
     let mut gen = IdGenerator::new();
 
     gen.encode_timestamp_test(0);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
 
     gen.encode_timestamp_test(1);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 1]);
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 1]);
 
     gen.encode_timestamp_test(57);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 57]);
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 57]);
 
     gen.encode_timestamp_test(58);
-    assert_eq!(&gen.prefix_plus_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 1, 0]);
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 1, 0]);
 }
 
 #[test]
@@ -171,7 +171,7 @@ fn test_encode_monotonic_over_range() {
     let mut prev: Vec<u8> = Vec::new();
     for offset in 0..10_000u64 {
         gen.encode_timestamp_test(ts + offset);
-        let encoded: Vec<u8> = gen.prefix_plus_counter_head()[..8].to_vec();
+        let encoded: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
         assert!(encoded > prev, "Not monotonic at offset {offset}");
         prev = encoded;
     }
@@ -182,7 +182,7 @@ fn test_encode_round_trip() {
     let mut gen = IdGenerator::new();
     let ts = current_time_ms();
     gen.encode_timestamp_test(ts);
-    let prefix_indices = &gen.prefix_plus_counter_head()[..8];
+    let prefix_indices = &gen.timestamp_and_counter_head()[..8];
     let mut val: u64 = 0;
     for &idx in prefix_indices {
         val = val * 58 + idx as u64;
@@ -197,11 +197,11 @@ fn test_encode_digit_boundaries() {
         let boundary = 58u64.pow(power);
 
         gen.encode_timestamp_test(boundary - 1);
-        let before: Vec<u8> = gen.prefix_plus_counter_head()[..8].to_vec();
+        let before: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
         gen.encode_timestamp_test(boundary);
-        let at: Vec<u8> = gen.prefix_plus_counter_head()[..8].to_vec();
+        let at: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
         gen.encode_timestamp_test(boundary + 1);
-        let after: Vec<u8> = gen.prefix_plus_counter_head()[..8].to_vec();
+        let after: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
 
         assert!(before < at, "boundary {boundary}: before >= at");
         assert!(at < after, "boundary {boundary}: at >= after");
@@ -213,7 +213,7 @@ fn test_encode_preserves_counter_head() {
     let mut gen = IdGenerator::new();
     gen.set_counter_head(&[33, 34, 35, 36, 37]); // a b c d e
     gen.encode_timestamp_test(12345);
-    assert_eq!(&gen.prefix_plus_counter_head()[8..], &[33, 34, 35, 36, 37]);
+    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[33, 34, 35, 36, 37]);
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +284,7 @@ fn test_single_carry() {
     gen.increment_carry_test();
 
     assert_eq!(gen.counter_tail(), 0); // '1' = index 0
-    assert_eq!(&gen.prefix_plus_counter_head()[8..], &[9, 9, 9, 9, 10]); // AAAAB
+    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 9, 9, 9, 10]); // AAAAB
 }
 
 #[test]
@@ -296,7 +296,7 @@ fn test_cascading_carry() {
     gen.increment_carry_test();
 
     assert_eq!(gen.counter_tail(), 0); // '1' = index 0
-    assert_eq!(&gen.prefix_plus_counter_head()[8..], &[9, 10, 0, 0, 0]); // AB111
+    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 10, 0, 0, 0]); // AB111
 }
 
 #[test]
