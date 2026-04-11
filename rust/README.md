@@ -23,7 +23,7 @@ let id = SparkId::new();
 // => "1ocmpHE1bFnygEBAPTzMK"
 
 println!("{id}");              // Display, no heap allocation
-let s: &str = &id;             // Deref to &str, zero-cost
+let s = id.as_str();           // SparkIdStr — stack-allocated, Deref<str>
 let owned: String = id.into(); // Into<String> when needed
 ```
 
@@ -53,7 +53,9 @@ Each ID is composed of two parts:
 
 ## `SparkId` type
 
-`SparkId` is a stack-allocated, `Copy` type — no heap allocation on creation. It implements `Deref<Target = str>`, `Display`, `Ord`, `Hash`, `FromStr`, and `Into<String>`, so it works anywhere a string is expected.
+`SparkId` is a stack-allocated, `Copy` type backed by a `u128` — no heap allocation on creation. The 21 Base58 characters are bit-packed into 128 bits (6 bits per character), preserving sort order. It implements `Display`, `Ord`, `Hash`, `FromStr`, and `Into<String>`.
+
+Use `as_str()` to get a `SparkIdStr` — a stack-allocated, `Copy` wrapper that dereferences to `&str`:
 
 ```rust
 use sparkid::SparkId;
@@ -62,6 +64,8 @@ let a = SparkId::new();
 let b = SparkId::new();
 assert!(b > a);                      // Ord — monotonically increasing
 println!("{a}");                      // Display — no allocation
+let s = a.as_str();                  // SparkIdStr — Deref<str>, no heap
+let slice: &str = &s;               // zero-cost &str access
 let set: std::collections::HashSet<SparkId> = [a, b].into(); // Hash
 ```
 
@@ -76,6 +80,26 @@ assert_eq!(id, parsed);
 ```
 
 Parsing validates that the input is exactly 21 characters and all characters are in the Base58 alphabet. Returns a `ParseSparkIdError` on failure.
+
+### Binary representation
+
+`SparkId` is backed by a `u128` (16 bytes) — smaller and faster to compare/sort than the 21-char string form. You can serialize the binary representation directly:
+
+```rust
+use sparkid::SparkId;
+
+let id = SparkId::new();
+
+// 16-byte big-endian binary — sort-preserving, memcmp-comparable
+let bytes: [u8; 16] = id.to_bytes();
+let restored = SparkId::from_bytes(bytes).unwrap();
+assert_eq!(id, restored);
+
+// Raw u128 — branchless comparison, ideal for in-memory sorting
+let raw: u128 = id.as_u128();
+let also_restored = SparkId::from_u128(raw).unwrap();
+assert_eq!(id, also_restored);
+```
 
 ### Extract timestamp
 

@@ -17,15 +17,16 @@
 //!
 //! // Simple usage — zero-allocation, thread-safe
 //! let id = SparkId::new();
-//! assert_eq!(id.len(), 21);
-//! println!("{id}");               // Display, no heap allocation
-//! let s: &str = &id;             // Deref to &str, free
-//! let owned: String = id.into(); // Into<String> when needed
+//! let s = id.as_str();
+//! assert_eq!(s.len(), 21);
+//! println!("{id}");                 // Display, no heap allocation
+//! let owned: String = id.into();   // Into<String> when needed
 //!
 //! // Advanced usage — own generator instance
 //! let mut gen = sparkid::IdGenerator::new();
 //! let id = gen.next_id();
-//! assert_eq!(id.len(), 21);
+//! let s = id.as_str();
+//! assert_eq!(s.len(), 21);
 //! ```
 
 #![no_std]
@@ -37,4 +38,4 @@ extern crate std;
 
 mod generator;
 
-pub use generator::{IdGenerator, ParseSparkIdError, SparkId};
+pub use generator::{IdGenerator, ParseSparkIdError, SparkId, SparkIdStr};
