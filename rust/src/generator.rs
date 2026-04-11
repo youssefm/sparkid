@@ -599,6 +599,7 @@ impl IdGenerator {
             .as_millis() as u64
     }
 
+    #[cold]
     fn encode_timestamp(&mut self, mut timestamp: u64) {
         let mut remainder: u64;
 
@@ -628,6 +629,7 @@ impl IdGenerator {
         self.index_buffer[7] = c7;
     }
 
+    #[cold]
     fn refill_random(&mut self) {
         self.rng.fill_bytes(&mut self.raw_buffer);
         let mut count = 0;
@@ -643,6 +645,7 @@ impl IdGenerator {
         self.random_position = 0;
     }
 
+    #[cold]
     fn seed_counter(&mut self) {
         if self.random_position + COUNTER_CHAR_COUNT > self.random_count {
             self.refill_random();
@@ -663,6 +666,7 @@ impl IdGenerator {
     /// (all 6 counter indices maxed), bumps the timestamp forward by 1ms
     /// and reseeds. Because the counter is randomly seeded each ms,
     /// overflow probability is n / 58^6 for n IDs generated in that ms.
+    #[cold]
     fn increment_carry(&mut self) {
         for i in (TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET).rev() {
             if self.index_buffer[i] < MAX_INDEX {
