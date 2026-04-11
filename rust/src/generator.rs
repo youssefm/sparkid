@@ -86,23 +86,6 @@ fn pack_suffix(counter_tail: u8, random: &[u8]) -> u128 {
     value as u128
 }
 
-/// Unpack a `u128` into 21 ASCII Base58 characters.
-///
-/// Reverses the packing performed by [`pack_prefix`] and [`pack_suffix`]:
-/// every 6 bits yield a character via the `ALPHABET` table, and the final
-/// byte's top 6 bits yield the 21st character.
-fn unpack_to_ascii(value: u128) -> [u8; ID_LENGTH] {
-    let mut out = [0u8; ID_LENGTH];
-    let mut shift = 122i32; // first index at bits 127..122
-    let mut i = 0;
-    while i < 21 {
-        out[i] = ALPHABET[((value >> shift as u32) & 0x3F) as usize];
-        shift -= 6;
-        i += 1;
-    }
-    out
-}
-
 /// The error returned when parsing a string or binary representation
 /// as a [`SparkId`] fails.
 ///
@@ -262,7 +245,7 @@ impl SparkId {
     /// Returns a stack-allocated [`SparkIdStr`] containing the 21-char
     /// Base58 string representation.
     pub fn as_str(&self) -> SparkIdStr {
-        SparkIdStr(unpack_to_ascii(self.0))
+        SparkIdStr::from_packed(self.0)
     }
 
     /// Returns the embedded timestamp as milliseconds since the Unix epoch.
@@ -313,8 +296,20 @@ impl SparkId {
 // ---------------------------------------------------------------------------
 
 impl SparkIdStr {
+    pub(crate) fn from_packed(value: u128) -> Self {
+        let mut out = [0u8; ID_LENGTH];
+        let mut shift = 122i32; // first index at bits 127..122
+        let mut i = 0;
+        while i < 21 {
+            out[i] = ALPHABET[((value >> shift as u32) & 0x3F) as usize];
+            shift -= 6;
+            i += 1;
+        }
+        Self(out)
+    }
+
     fn as_str_inner(&self) -> &str {
-        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
+        // SAFETY: from_packed only produces bytes from ALPHABET, which are ASCII
         // and therefore always valid UTF-8. Skips the redundant validation scan.
         unsafe { core::str::from_utf8_unchecked(&self.0) }
     }
@@ -352,30 +347,20 @@ impl fmt::Debug for SparkIdStr {
 
 impl fmt::Display for SparkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ascii = unpack_to_ascii(self.0);
-        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
-        // and therefore always valid UTF-8.
-        let s = unsafe { core::str::from_utf8_unchecked(&ascii) };
-        f.write_str(s)
+        f.write_str(&*self.as_str())
     }
 }
 
 impl fmt::Debug for SparkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let ascii = unpack_to_ascii(self.0);
-        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
-        // and therefore always valid UTF-8.
-        let s = unsafe { core::str::from_utf8_unchecked(&ascii) };
-        write!(f, "SparkId({s})")
+        write!(f, "SparkId({})", &*self.as_str())
     }
 }
 
 impl From<SparkId> for String {
     fn from(id: SparkId) -> String {
-        let ascii = unpack_to_ascii(id.0);
-        // SAFETY: unpack_to_ascii only produces bytes from ALPHABET, which are ASCII
-        // and therefore always valid UTF-8.
-        unsafe { String::from_utf8_unchecked(ascii.to_vec()) }
+        let s = id.as_str();
+        String::from(&*s)
     }
 }
 
