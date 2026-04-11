@@ -1,3 +1,4 @@
+use core::borrow::Borrow;
 use core::fmt;
 use core::ops::Deref;
 use core::str::FromStr;
@@ -217,6 +218,36 @@ impl Deref for SparkId {
 impl AsRef<str> for SparkId {
     fn as_ref(&self) -> &str {
         self.as_str()
+    }
+}
+
+impl Borrow<str> for SparkId {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl PartialEq<str> for SparkId {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<SparkId> for str {
+    fn eq(&self, other: &SparkId) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl PartialEq<&str> for SparkId {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<SparkId> for &str {
+    fn eq(&self, other: &SparkId) -> bool {
+        *self == other.as_str()
     }
 }
 
