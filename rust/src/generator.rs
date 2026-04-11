@@ -51,23 +51,6 @@ const DECODE: [u8; 256] = {
     table
 };
 
-/// Pack 21 index values (0-57) into a `u128`.
-///
-/// Every 4 indices occupy 24 bits (4 × 6 bits), packed into 3 bytes.
-/// The last index occupies the top 6 bits of the final byte, with 2 padding
-/// bits set to zero.
-fn pack_indices(indices: &[u8; ID_LENGTH]) -> u128 {
-    let mut value: u128 = 0;
-    let mut i = 0;
-    while i < 20 {
-        value = (value << 6) | indices[i] as u128;
-        i += 1;
-    }
-    // Last index + 2 padding bits
-    value = (value << 8) | (indices[20] as u128) << 2;
-    value
-}
-
 /// Pack the first 13 indices (timestamp + counter head) into the upper
 /// portion of a `u128`, occupying bits 127..50 with bits 49..0 zeroed.
 ///
@@ -105,9 +88,9 @@ fn pack_suffix(counter_tail: u8, random: &[u8]) -> u128 {
 
 /// Unpack a `u128` into 21 ASCII Base58 characters.
 ///
-/// Reverses the packing performed by [`pack_indices`]: every 3 bytes yield
-/// 4 characters via the `ALPHABET` table, and the final byte's top 6 bits
-/// yield the 21st character.
+/// Reverses the packing performed by [`pack_prefix`] and [`pack_suffix`]:
+/// every 6 bits yield a character via the `ALPHABET` table, and the final
+/// byte's top 6 bits yield the 21st character.
 fn unpack_to_ascii(value: u128) -> [u8; ID_LENGTH] {
     let mut out = [0u8; ID_LENGTH];
     let mut shift = 122i32; // first index at bits 127..122
