@@ -523,13 +523,13 @@ impl IdGenerator {
     #[cfg(feature = "std")]
     pub fn next_id(&mut self) -> SparkId {
         let random_position = self.advance(self.current_time_ms());
-        SparkId(
-            self.cached_prefix
-                | pack_suffix(
-                    self.counter_tail,
-                    &self.random_buffer[random_position..random_position + RANDOM_CHAR_COUNT],
-                ),
-        )
+        // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
+        // and random_count <= random_buffer.len() (RANDOM_BATCH_SIZE).
+        let random = unsafe {
+            self.random_buffer
+                .get_unchecked(random_position..random_position + RANDOM_CHAR_COUNT)
+        };
+        SparkId(self.cached_prefix | pack_suffix(self.counter_tail, random))
     }
 
     /// Generates a unique, time-sortable, 21-char Base58 ID using the given
@@ -551,14 +551,13 @@ impl IdGenerator {
     /// ```
     pub fn next_id_at(&mut self, timestamp_ms: u64) -> SparkId {
         let random_position = self.advance(timestamp_ms);
-        SparkId(
-            self.cached_prefix
-                | pack_suffix(
-                    self.counter_tail,
-                    &self.random_buffer
-                        [random_position..random_position + RANDOM_CHAR_COUNT],
-                ),
-        )
+        // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
+        // and random_count <= random_buffer.len() (RANDOM_BATCH_SIZE).
+        let random = unsafe {
+            self.random_buffer
+                .get_unchecked(random_position..random_position + RANDOM_CHAR_COUNT)
+        };
+        SparkId(self.cached_prefix | pack_suffix(self.counter_tail, random))
     }
 
     /// Advance internal state for the next ID. Returns the random buffer
