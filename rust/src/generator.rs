@@ -424,6 +424,99 @@ impl<'a> TryFrom<&'a str> for SparkId {
     }
 }
 
+// ---------------------------------------------------------------------------
+// serde impls
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "serde")]
+mod serde_support {
+    use super::{SparkId, SparkIdStr, ID_LENGTH, PACKED_BYTE_COUNT};
+    use core::fmt;
+    use core::str::FromStr;
+    use serde::de::{self, Visitor};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    // -- SparkId --------------------------------------------------------------
+
+    impl Serialize for SparkId {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            if serializer.is_human_readable() {
+                serializer.serialize_str(self.as_str().as_str_inner())
+            } else {
+                let bytes = self.0.to_be_bytes();
+                serializer.serialize_bytes(&bytes)
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SparkId {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct SparkIdVisitor;
+
+            impl<'de> Visitor<'de> for SparkIdVisitor {
+                type Value = SparkId;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    write!(
+                        formatter,
+                        "a {ID_LENGTH}-char Base58 string or {PACKED_BYTE_COUNT}-byte binary SparkId"
+                    )
+                }
+
+                fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkId, E> {
+                    SparkId::from_str(value).map_err(de::Error::custom)
+                }
+
+                fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<SparkId, E> {
+                    let bytes: [u8; PACKED_BYTE_COUNT] =
+                        value.try_into().map_err(|_| {
+                            de::Error::invalid_length(
+                                value.len(),
+                                &"16 bytes for binary SparkId",
+                            )
+                        })?;
+                    SparkId::from_bytes(bytes).map_err(de::Error::custom)
+                }
+            }
+
+            if deserializer.is_human_readable() {
+                deserializer.deserialize_str(SparkIdVisitor)
+            } else {
+                deserializer.deserialize_bytes(SparkIdVisitor)
+            }
+        }
+    }
+
+    // -- SparkIdStr -----------------------------------------------------------
+
+    impl Serialize for SparkIdStr {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self.as_str_inner())
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SparkIdStr {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct SparkIdStrVisitor;
+
+            impl<'de> Visitor<'de> for SparkIdStrVisitor {
+                type Value = SparkIdStr;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    write!(formatter, "a {ID_LENGTH}-char Base58 SparkId string")
+                }
+
+                fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkIdStr, E> {
+                    let id = SparkId::from_str(value).map_err(de::Error::custom)?;
+                    Ok(id.as_str())
+                }
+            }
+
+            deserializer.deserialize_str(SparkIdStrVisitor)
+        }
+    }
+}
+
 /// Generates 21-char, Base58, time-sortable, collision-resistant unique IDs.
 ///
 /// Each ID is composed of three parts:

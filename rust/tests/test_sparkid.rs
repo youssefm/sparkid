@@ -1135,3 +1135,106 @@ fn test_from_u128_known_value() {
     let id = SparkId::from_u128(all_zeros).unwrap();
     assert_eq!(&*id.as_str(), "111111111111111111111");
 }
+
+// ---------------------------------------------------------------------------
+// serde
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "serde")]
+mod serde_tests {
+    use sparkid::{IdGenerator, SparkId, SparkIdStr};
+
+    #[test]
+    fn test_sparkid_json_roundtrip() {
+        let mut generator = IdGenerator::new();
+        let id = generator.next_id();
+        let json = serde_json::to_string(&id).unwrap();
+
+        // JSON output is a quoted 21-char Base58 string
+        let expected_string: String = id.into();
+        assert_eq!(json, format!("\"{}\"", expected_string));
+
+        let deserialized: SparkId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, deserialized);
+    }
+
+    #[test]
+    fn test_sparkid_json_roundtrip_equality() {
+        let mut generator = IdGenerator::new();
+        for _ in 0..100 {
+            let id = generator.next_id();
+            let json = serde_json::to_string(&id).unwrap();
+            let restored: SparkId = serde_json::from_str(&json).unwrap();
+            assert_eq!(id, restored);
+        }
+    }
+
+    #[test]
+    fn test_sparkid_binary_roundtrip() {
+        let mut generator = IdGenerator::new();
+        for _ in 0..100 {
+            let id = generator.next_id();
+            let bytes = postcard::to_allocvec(&id).unwrap();
+            let restored: SparkId = postcard::from_bytes(&bytes).unwrap();
+            assert_eq!(id, restored);
+        }
+    }
+
+    #[test]
+    fn test_sparkid_binary_preserves_sort_order() {
+        let mut generator = IdGenerator::new();
+        let id_a = generator.next_id();
+        let id_b = generator.next_id();
+        assert!(id_a < id_b, "IDs should be monotonically increasing");
+
+        let bytes_a = postcard::to_allocvec(&id_a).unwrap();
+        let bytes_b = postcard::to_allocvec(&id_b).unwrap();
+        assert!(
+            bytes_a < bytes_b,
+            "serialized bytes should preserve sort order"
+        );
+    }
+
+    #[test]
+    fn test_sparkid_str_json_roundtrip() {
+        let mut generator = IdGenerator::new();
+        for _ in 0..100 {
+            let id = generator.next_id();
+            let id_str = id.as_str();
+            let json = serde_json::to_string(&id_str).unwrap();
+            let restored: SparkIdStr = serde_json::from_str(&json).unwrap();
+            assert_eq!(id_str, restored);
+        }
+    }
+
+    #[test]
+    fn test_deserialize_invalid_json_wrong_length() {
+        let result = serde_json::from_str::<SparkId>("\"abc\"");
+        assert!(result.is_err());
+        let error_message = result.unwrap_err().to_string();
+        assert!(
+            error_message.contains("length"),
+            "error should mention length: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_invalid_json_bad_characters() {
+        // 'O' and '0' are not in the Base58 alphabet
+        let result = serde_json::from_str::<SparkId>("\"OOOOOOOOOOOOOOOOOOOOO\"");
+        assert!(result.is_err());
+        let error_message = result.unwrap_err().to_string();
+        assert!(
+            error_message.contains("invalid character"),
+            "error should mention invalid character: {error_message}"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_invalid_binary_wrong_byte_count() {
+        // postcard encodes byte slices with a length prefix; provide wrong length
+        let short_bytes: &[u8] = &[4, 0xDE, 0xAD, 0xBE, 0xEF]; // 4-byte payload
+        let result = postcard::from_bytes::<SparkId>(short_bytes);
+        assert!(result.is_err());
+    }
+}
