@@ -38,7 +38,7 @@ const PACKED_BYTE_COUNT: usize = 16;
 // Derived layout constants
 const COUNTER_HEAD_CHAR_COUNT: usize = COUNTER_CHAR_COUNT - 1;
 const COUNTER_TAIL_OFFSET: usize = TIMESTAMP_CHAR_COUNT + COUNTER_HEAD_CHAR_COUNT;
-const RANDOM_START_OFFSET: usize = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT;
+const PREFIX_INDEX_COUNT: usize = COUNTER_TAIL_OFFSET; // timestamp (8) + counter head (5)
 
 // Reverse-lookup table: ASCII byte -> Base58 index (0-57), or 0xFF for invalid.
 const DECODE: [u8; 256] = {
@@ -56,12 +56,10 @@ const DECODE: [u8; 256] = {
 ///
 /// Used to cache the slow-changing prefix so the hot path only packs the
 /// 8 fast-changing suffix indices (counter tail + random) using `u64`.
-fn pack_prefix(indices: &[u8; ID_LENGTH]) -> u128 {
+fn pack_prefix(indices: &[u8; PREFIX_INDEX_COUNT]) -> u128 {
     let mut value: u128 = 0;
-    let mut i = 0;
-    while i < RANDOM_START_OFFSET - 1 {
-        value = (value << 6) | indices[i] as u128;
-        i += 1;
+    for &index in indices {
+        value = (value << 6) | index as u128;
     }
     // Shift to position: 13 indices × 6 bits = 78 bits of data.
     // The lowest index (index 12) needs to land at bits 55..50,
@@ -453,8 +451,8 @@ impl<'a> TryFrom<&'a str> for SparkId {
 pub struct IdGenerator {
     timestamp_cache_ms: u64,
     // Indices for timestamp (0..8) and counter head (8..13), used for carry
-    // propagation. The random tail and counter tail are not stored here.
-    index_buffer: [u8; ID_LENGTH],
+    // propagation. The counter tail and random tail are stored separately.
+    index_buffer: [u8; PREFIX_INDEX_COUNT],
     // Counter tail — kept as separate field for fast increment
     counter_tail: u8,
     // Cached packed u128 of indices 0-12 (bits 127..50). Recomputed only when
@@ -479,7 +477,7 @@ impl IdGenerator {
     pub fn new() -> Self {
         IdGenerator {
             timestamp_cache_ms: 0,
-            index_buffer: [FIRST_INDEX; ID_LENGTH],
+            index_buffer: [FIRST_INDEX; PREFIX_INDEX_COUNT],
             counter_tail: FIRST_INDEX,
             cached_prefix: 0,
             random_buffer: vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice(),
@@ -686,11 +684,11 @@ impl IdGenerator {
         self.time_function = None;
     }
 
-    /// Read the prefix+counter_head buffer (first 13 elements of index_buffer).
+    /// Read the prefix buffer (timestamp + counter head indices).
     ///
     /// Note: these are Base58 index values (0-57), not ASCII bytes.
-    pub fn timestamp_and_counter_head(&self) -> &[u8; 13] {
-        self.index_buffer[..COUNTER_TAIL_OFFSET].try_into().unwrap()
+    pub fn timestamp_and_counter_head(&self) -> &[u8; PREFIX_INDEX_COUNT] {
+        &self.index_buffer
     }
 
     /// Read the counter tail index value.
