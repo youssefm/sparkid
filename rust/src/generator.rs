@@ -432,7 +432,6 @@ impl<'a> TryFrom<&'a str> for SparkId {
 mod serde_support {
     use super::{SparkId, SparkIdStr, ID_LENGTH, PACKED_BYTE_COUNT};
     use core::fmt;
-    use core::str::FromStr;
     use serde::de::{self, Visitor};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -461,7 +460,7 @@ mod serde_support {
                     }
 
                     fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkId, E> {
-                        SparkId::from_str(value).map_err(de::Error::custom)
+                        value.parse().map_err(de::Error::custom)
                     }
                 }
 
@@ -493,7 +492,7 @@ mod serde_support {
                 }
 
                 fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkIdStr, E> {
-                    let id = SparkId::from_str(value).map_err(de::Error::custom)?;
+                    let id: SparkId = value.parse().map_err(de::Error::custom)?;
                     Ok(id.as_str())
                 }
             }
