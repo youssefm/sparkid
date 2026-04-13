@@ -57,7 +57,8 @@ def to_bytes(id_string: str) -> bytes:
     for position, byte_value in enumerate(encoded):
         if decode[byte_value] == _INVALID_INDEX:
             raise ValueError(
-                f"invalid character {chr(byte_value)!r} at position {position} in SparkId"
+                f"invalid character {chr(byte_value)!r}"
+                f" at position {position} in SparkId"
             )
 
     out = bytearray(_BINARY_LENGTH)
@@ -75,7 +76,8 @@ def to_bytes(id_string: str) -> bytes:
         out[byte_index + 2] = packed & _BYTE_MASK
         character_index += _CHARACTERS_PER_GROUP
 
-    out[_PACKED_GROUPS_BYTE_COUNT] = decode[encoded[_TAIL_CHARACTER_INDEX]] << _TAIL_SHIFT
+    tail_index = decode[encoded[_TAIL_CHARACTER_INDEX]]
+    out[_PACKED_GROUPS_BYTE_COUNT] = tail_index << _TAIL_SHIFT
     return bytes(out)
 
 
@@ -105,7 +107,11 @@ def from_bytes(data: bytes) -> str:
     characters: list[str] = []
 
     for byte_index in range(0, _PACKED_GROUPS_BYTE_COUNT, _BYTES_PER_GROUP):
-        packed = (data[byte_index] << 16) | (data[byte_index + 1] << 8) | data[byte_index + 2]
+        packed = (
+            (data[byte_index] << 16)
+            | (data[byte_index + 1] << 8)
+            | data[byte_index + 2]
+        )
         a = (packed >> 18) & _INDEX_MASK
         b = (packed >> 12) & _INDEX_MASK
         c = (packed >> 6) & _INDEX_MASK
