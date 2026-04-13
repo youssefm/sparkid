@@ -1175,6 +1175,8 @@ mod serde_tests {
         for _ in 0..100 {
             let id = generator.next_id();
             let bytes = postcard::to_allocvec(&id).unwrap();
+            assert_eq!(bytes.len(), 16, "binary encoding should be exactly 16 bytes");
+            assert_eq!(bytes.as_slice(), &id.to_bytes(), "wire bytes should match to_bytes()");
             let restored: SparkId = postcard::from_bytes(&bytes).unwrap();
             assert_eq!(id, restored);
         }
@@ -1232,8 +1234,8 @@ mod serde_tests {
 
     #[test]
     fn test_deserialize_invalid_binary_wrong_byte_count() {
-        // postcard encodes byte slices with a length prefix; provide wrong length
-        let short_bytes: &[u8] = &[4, 0xDE, 0xAD, 0xBE, 0xEF]; // 4-byte payload
+        // Fixed-size array encoding: fewer than 16 bytes should fail
+        let short_bytes: &[u8] = &[0xDE, 0xAD, 0xBE, 0xEF];
         let result = postcard::from_bytes::<SparkId>(short_bytes);
         assert!(result.is_err());
     }

@@ -441,48 +441,34 @@ mod serde_support {
     impl Serialize for SparkId {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
             if serializer.is_human_readable() {
-                serializer.serialize_str(self.as_str().as_str_inner())
+                serializer.serialize_str(&self.as_str())
             } else {
-                let bytes = self.0.to_be_bytes();
-                serializer.serialize_bytes(&bytes)
+                self.to_bytes().serialize(serializer)
             }
         }
     }
 
     impl<'de> Deserialize<'de> for SparkId {
         fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            struct SparkIdVisitor;
-
-            impl<'de> Visitor<'de> for SparkIdVisitor {
-                type Value = SparkId;
-
-                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    write!(
-                        formatter,
-                        "a {ID_LENGTH}-char Base58 string or {PACKED_BYTE_COUNT}-byte binary SparkId"
-                    )
-                }
-
-                fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkId, E> {
-                    SparkId::from_str(value).map_err(de::Error::custom)
-                }
-
-                fn visit_bytes<E: de::Error>(self, value: &[u8]) -> Result<SparkId, E> {
-                    let bytes: [u8; PACKED_BYTE_COUNT] =
-                        value.try_into().map_err(|_| {
-                            de::Error::invalid_length(
-                                value.len(),
-                                &"16 bytes for binary SparkId",
-                            )
-                        })?;
-                    SparkId::from_bytes(bytes).map_err(de::Error::custom)
-                }
-            }
-
             if deserializer.is_human_readable() {
-                deserializer.deserialize_str(SparkIdVisitor)
+                struct SparkIdStringVisitor;
+
+                impl<'de> Visitor<'de> for SparkIdStringVisitor {
+                    type Value = SparkId;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        write!(formatter, "a {ID_LENGTH}-char Base58 SparkId string")
+                    }
+
+                    fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkId, E> {
+                        SparkId::from_str(value).map_err(de::Error::custom)
+                    }
+                }
+
+                deserializer.deserialize_str(SparkIdStringVisitor)
             } else {
-                deserializer.deserialize_bytes(SparkIdVisitor)
+                let bytes = <[u8; PACKED_BYTE_COUNT]>::deserialize(deserializer)?;
+                SparkId::from_bytes(bytes).map_err(de::Error::custom)
             }
         }
     }
@@ -491,7 +477,7 @@ mod serde_support {
 
     impl Serialize for SparkIdStr {
         fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            serializer.serialize_str(self.as_str_inner())
+            serializer.serialize_str(self)
         }
     }
 
