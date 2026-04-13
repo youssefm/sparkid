@@ -424,6 +424,57 @@ impl<'a> TryFrom<&'a str> for SparkId {
     }
 }
 
+impl FromStr for SparkIdStr {
+    type Err = ParseSparkIdError;
+
+    /// Parse a string as a `SparkIdStr`.
+    ///
+    /// Validates that the input is exactly 21 ASCII bytes, all from the
+    /// Base58 alphabet, then copies the bytes directly into a `SparkIdStr`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sparkid::SparkId;
+    ///
+    /// let id = SparkId::new();
+    /// let id_str = id.as_str();
+    /// let parsed: sparkid::SparkIdStr = id_str.to_string().parse().unwrap();
+    /// assert_eq!(id_str, parsed);
+    /// ```
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
+        if bytes.len() != ID_LENGTH {
+            return Err(ParseSparkIdError {
+                kind: ParseErrorKind::InvalidLength(bytes.len()),
+            });
+        }
+        let mut position = 0;
+        while position < ID_LENGTH {
+            if DECODE[bytes[position] as usize] == INVALID_INDEX {
+                return Err(ParseSparkIdError {
+                    kind: ParseErrorKind::InvalidChar {
+                        byte: bytes[position],
+                        position,
+                    },
+                });
+            }
+            position += 1;
+        }
+        let mut out = [0u8; ID_LENGTH];
+        out.copy_from_slice(bytes);
+        Ok(SparkIdStr(out))
+    }
+}
+
+impl<'a> TryFrom<&'a str> for SparkIdStr {
+    type Error = ParseSparkIdError;
+
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // serde impls
 // ---------------------------------------------------------------------------
@@ -492,8 +543,7 @@ mod serde_support {
                 }
 
                 fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkIdStr, E> {
-                    let id: SparkId = value.parse().map_err(de::Error::custom)?;
-                    Ok(id.as_str())
+                    value.parse().map_err(de::Error::custom)
                 }
             }
 
