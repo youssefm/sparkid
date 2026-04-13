@@ -449,17 +449,12 @@ impl FromStr for SparkIdStr {
                 kind: ParseErrorKind::InvalidLength(bytes.len()),
             });
         }
-        let mut position = 0;
-        while position < ID_LENGTH {
-            if DECODE[bytes[position] as usize] == INVALID_INDEX {
+        for (position, &byte) in bytes.iter().enumerate() {
+            if DECODE[byte as usize] == INVALID_INDEX {
                 return Err(ParseSparkIdError {
-                    kind: ParseErrorKind::InvalidChar {
-                        byte: bytes[position],
-                        position,
-                    },
+                    kind: ParseErrorKind::InvalidChar { byte, position },
                 });
             }
-            position += 1;
         }
         let mut out = [0u8; ID_LENGTH];
         out.copy_from_slice(bytes);
