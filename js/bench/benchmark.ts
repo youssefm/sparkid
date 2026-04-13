@@ -1,8 +1,10 @@
 /// <reference types="node" />
 import { generateId } from "../src/index";
+import { toBytes, fromBytes } from "../src/binary";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const compareMode = process.argv.includes("--compare");
+const binaryMode = process.argv.includes("--binary");
 const ITERATIONS = compareMode ? 100_000 : 1_000_000;
 const WARMUP = compareMode ? 1_000 : 10_000;
 const TRIALS = 5;
@@ -56,6 +58,8 @@ function verify(): void {
     console.log();
     if (compareMode) {
       runComparison();
+    } else if (binaryMode) {
+      benchmarkBinary();
     } else {
       benchmark();
     }
@@ -117,6 +121,59 @@ function benchmark(): void {
   for (let i = 0; i < 5; i++) {
     console.log(`  ${generateId()}`);
   }
+}
+
+// --- Binary encoding benchmark ---
+
+function benchmarkBinary(): void {
+  console.log();
+  console.log("=== Binary Encoding ===");
+  console.log();
+
+  // Pre-generate IDs for toBytes benchmark
+  const ids = Array.from({ length: ITERATIONS }, () => generateId());
+
+  // Pre-generate binary for fromBytes benchmark
+  const binaries = ids.map(toBytes);
+
+  // Warm up
+  for (let i = 0; i < WARMUP; i++) {
+    toBytes(ids[i % ids.length]);
+    fromBytes(binaries[i % binaries.length]);
+  }
+
+  // Benchmark toBytes
+  const toBytesResults: number[] = [];
+  for (let trial = 0; trial < TRIALS; trial++) {
+    const start = process.hrtime.bigint();
+    for (let i = 0; i < ITERATIONS; i++) {
+      toBytes(ids[i]);
+    }
+    const elapsedNs = Number(process.hrtime.bigint() - start);
+    toBytesResults.push(elapsedNs / ITERATIONS / 1_000);
+  }
+  toBytesResults.sort((a, b) => a - b);
+  const toBytesMedian = toBytesResults[Math.floor(toBytesResults.length / 2)];
+  console.log(
+    `  toBytes:   ${toBytesMedian.toFixed(3)} µs/call  ${Math.round(1_000_000 / toBytesMedian).toLocaleString()} ops/sec`,
+  );
+
+  // Benchmark fromBytes
+  const fromBytesResults: number[] = [];
+  for (let trial = 0; trial < TRIALS; trial++) {
+    const start = process.hrtime.bigint();
+    for (let i = 0; i < ITERATIONS; i++) {
+      fromBytes(binaries[i]);
+    }
+    const elapsedNs = Number(process.hrtime.bigint() - start);
+    fromBytesResults.push(elapsedNs / ITERATIONS / 1_000);
+  }
+  fromBytesResults.sort((a, b) => a - b);
+  const fromBytesMedian =
+    fromBytesResults[Math.floor(fromBytesResults.length / 2)];
+  console.log(
+    `  fromBytes: ${fromBytesMedian.toFixed(3)} µs/call  ${Math.round(1_000_000 / fromBytesMedian).toLocaleString()} ops/sec`,
+  );
 }
 
 // --- Comparison benchmark ---

@@ -2,11 +2,6 @@ from sparkid._constants import ALPHABET, BASE, ID_LENGTH
 
 # Binary encoding constants
 _BINARY_LENGTH = 16
-_CHARACTERS_PER_GROUP = 4
-_BYTES_PER_GROUP = 3
-_FULL_GROUP_COUNT = 5
-_PACKED_GROUPS_BYTE_COUNT = _FULL_GROUP_COUNT * _BYTES_PER_GROUP  # 15
-_TAIL_CHARACTER_INDEX = ID_LENGTH - 1  # 20
 _INDEX_MASK = 0x3F
 _BYTE_MASK = 0xFF
 _PADDING_MASK = 0x03
@@ -14,9 +9,13 @@ _TAIL_SHIFT = 2
 _INVALID_INDEX = 0xFF
 
 # Reverse lookup: byte value -> Base58 index (0-57), or 0xFF if invalid.
-_DECODE = [_INVALID_INDEX] * 256
+# 128 entries cover all ASCII values; .encode("ascii") rejects anything higher.
+_DECODE = [_INVALID_INDEX] * 128
 for _i, _c in enumerate(ALPHABET):
     _DECODE[ord(_c)] = _i
+
+# Validation lookup: True if index is valid (0-57).
+_VALID_INDEX = [i < BASE for i in range(64)]
 
 
 def to_bytes(id_string: str) -> bytes:
@@ -41,10 +40,9 @@ def to_bytes(id_string: str) -> bytes:
     """
     if len(id_string) != ID_LENGTH:
         raise ValueError(
-            f"invalid SparkId length: expected {ID_LENGTH}, got {len(id_string)}"
+            f"invalid SparkId length: expected {ID_LENGTH},"
+            f" got {len(id_string)}"
         )
-
-    decode = _DECODE
 
     try:
         encoded = id_string.encode("ascii")
@@ -53,32 +51,59 @@ def to_bytes(id_string: str) -> bytes:
             "invalid non-ASCII character in SparkId"
         ) from error
 
-    # Validate all characters before packing.
-    for position, byte_value in enumerate(encoded):
-        if decode[byte_value] == _INVALID_INDEX:
-            raise ValueError(
-                f"invalid character {chr(byte_value)!r}"
-                f" at position {position} in SparkId"
-            )
+    d = _DECODE
+    i0 = d[encoded[0]]
+    i1 = d[encoded[1]]
+    i2 = d[encoded[2]]
+    i3 = d[encoded[3]]
+    i4 = d[encoded[4]]
+    i5 = d[encoded[5]]
+    i6 = d[encoded[6]]
+    i7 = d[encoded[7]]
+    i8 = d[encoded[8]]
+    i9 = d[encoded[9]]
+    i10 = d[encoded[10]]
+    i11 = d[encoded[11]]
+    i12 = d[encoded[12]]
+    i13 = d[encoded[13]]
+    i14 = d[encoded[14]]
+    i15 = d[encoded[15]]
+    i16 = d[encoded[16]]
+    i17 = d[encoded[17]]
+    i18 = d[encoded[18]]
+    i19 = d[encoded[19]]
+    i20 = d[encoded[20]]
 
-    out = bytearray(_BINARY_LENGTH)
+    if (
+        i0 | i1 | i2 | i3 | i4 | i5 | i6 | i7 | i8 | i9 | i10
+        | i11 | i12 | i13 | i14 | i15 | i16 | i17 | i18 | i19
+        | i20
+    ) == _INVALID_INDEX:
+        for position, byte_value in enumerate(encoded):
+            if d[byte_value] == _INVALID_INDEX:
+                raise ValueError(
+                    f"invalid character {chr(byte_value)!r}"
+                    f" at position {position} in SparkId"
+                )
 
-    character_index = 0
-    for byte_index in range(0, _PACKED_GROUPS_BYTE_COUNT, _BYTES_PER_GROUP):
-        packed = (
-            (decode[encoded[character_index]] << 18)
-            | (decode[encoded[character_index + 1]] << 12)
-            | (decode[encoded[character_index + 2]] << 6)
-            | decode[encoded[character_index + 3]]
-        )
-        out[byte_index] = (packed >> 16) & _BYTE_MASK
-        out[byte_index + 1] = (packed >> 8) & _BYTE_MASK
-        out[byte_index + 2] = packed & _BYTE_MASK
-        character_index += _CHARACTERS_PER_GROUP
-
-    tail_index = decode[encoded[_TAIL_CHARACTER_INDEX]]
-    out[_PACKED_GROUPS_BYTE_COUNT] = tail_index << _TAIL_SHIFT
-    return bytes(out)
+    return bytes((
+        (i0 << 2) | (i1 >> 4),
+        ((i1 & 0xF) << 4) | (i2 >> 2),
+        ((i2 & 0x3) << 6) | i3,
+        (i4 << 2) | (i5 >> 4),
+        ((i5 & 0xF) << 4) | (i6 >> 2),
+        ((i6 & 0x3) << 6) | i7,
+        (i8 << 2) | (i9 >> 4),
+        ((i9 & 0xF) << 4) | (i10 >> 2),
+        ((i10 & 0x3) << 6) | i11,
+        (i12 << 2) | (i13 >> 4),
+        ((i13 & 0xF) << 4) | (i14 >> 2),
+        ((i14 & 0x3) << 6) | i15,
+        (i16 << 2) | (i17 >> 4),
+        ((i17 & 0xF) << 4) | (i18 >> 2),
+        ((i18 & 0x3) << 6) | i19,
+        i20 << _TAIL_SHIFT,
+    ))
 
 
 def from_bytes(data: bytes) -> str:
@@ -100,35 +125,53 @@ def from_bytes(data: bytes) -> str:
     """
     if len(data) != _BINARY_LENGTH:
         raise ValueError(
-            f"invalid binary length: expected {_BINARY_LENGTH}, got {len(data)}"
+            f"invalid binary length: expected {_BINARY_LENGTH},"
+            f" got {len(data)}"
         )
 
-    alphabet = ALPHABET
-    characters: list[str] = []
+    a0 = (data[0] >> 2) & _INDEX_MASK
+    a1 = ((data[0] & 0x3) << 4) | (data[1] >> 4)
+    a2 = ((data[1] & 0xF) << 2) | (data[2] >> 6)
+    a3 = data[2] & _INDEX_MASK
+    a4 = (data[3] >> 2) & _INDEX_MASK
+    a5 = ((data[3] & 0x3) << 4) | (data[4] >> 4)
+    a6 = ((data[4] & 0xF) << 2) | (data[5] >> 6)
+    a7 = data[5] & _INDEX_MASK
+    a8 = (data[6] >> 2) & _INDEX_MASK
+    a9 = ((data[6] & 0x3) << 4) | (data[7] >> 4)
+    a10 = ((data[7] & 0xF) << 2) | (data[8] >> 6)
+    a11 = data[8] & _INDEX_MASK
+    a12 = (data[9] >> 2) & _INDEX_MASK
+    a13 = ((data[9] & 0x3) << 4) | (data[10] >> 4)
+    a14 = ((data[10] & 0xF) << 2) | (data[11] >> 6)
+    a15 = data[11] & _INDEX_MASK
+    a16 = (data[12] >> 2) & _INDEX_MASK
+    a17 = ((data[12] & 0x3) << 4) | (data[13] >> 4)
+    a18 = ((data[13] & 0xF) << 2) | (data[14] >> 6)
+    a19 = data[14] & _INDEX_MASK
+    a20 = (data[15] >> _TAIL_SHIFT) & _INDEX_MASK
 
-    for byte_index in range(0, _PACKED_GROUPS_BYTE_COUNT, _BYTES_PER_GROUP):
-        packed = (
-            (data[byte_index] << 16)
-            | (data[byte_index + 1] << 8)
-            | data[byte_index + 2]
-        )
-        a = (packed >> 18) & _INDEX_MASK
-        b = (packed >> 12) & _INDEX_MASK
-        c = (packed >> 6) & _INDEX_MASK
-        d = packed & _INDEX_MASK
-        if a >= BASE or b >= BASE or c >= BASE or d >= BASE:
-            raise ValueError(
-                f"invalid 6-bit index in binary SparkId at byte {byte_index}"
-            )
-        characters.append(alphabet[a])
-        characters.append(alphabet[b])
-        characters.append(alphabet[c])
-        characters.append(alphabet[d])
-
-    last_index = (data[_PACKED_GROUPS_BYTE_COUNT] >> _TAIL_SHIFT) & _INDEX_MASK
-    if last_index >= BASE or (data[_PACKED_GROUPS_BYTE_COUNT] & _PADDING_MASK) != 0:
+    v = _VALID_INDEX
+    if not (
+        v[a0] and v[a1] and v[a2] and v[a3] and v[a4]
+        and v[a5] and v[a6] and v[a7] and v[a8] and v[a9]
+        and v[a10] and v[a11] and v[a12] and v[a13] and v[a14]
+        and v[a15] and v[a16] and v[a17] and v[a18] and v[a19]
+        and v[a20]
+    ):
         raise ValueError(
-            "invalid tail byte or non-zero padding in binary SparkId"
+            "invalid 6-bit index in binary SparkId"
         )
-    characters.append(alphabet[last_index])
-    return "".join(characters)
+
+    if (data[15] & _PADDING_MASK) != 0:
+        raise ValueError(
+            "non-zero padding bits in binary SparkId"
+        )
+
+    e = ALPHABET
+    return "".join((
+        e[a0], e[a1], e[a2], e[a3], e[a4], e[a5], e[a6],
+        e[a7], e[a8], e[a9], e[a10], e[a11], e[a12],
+        e[a13], e[a14], e[a15], e[a16], e[a17], e[a18],
+        e[a19], e[a20],
+    ))
