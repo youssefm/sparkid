@@ -424,6 +424,127 @@ impl<'a> TryFrom<&'a str> for SparkId {
     }
 }
 
+impl FromStr for SparkIdStr {
+    type Err = ParseSparkIdError;
+
+    /// Parse a string as a `SparkIdStr`.
+    ///
+    /// Validates that the input is exactly 21 ASCII bytes, all from the
+    /// Base58 alphabet, then copies the bytes directly into a `SparkIdStr`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sparkid::SparkId;
+    ///
+    /// let id = SparkId::new();
+    /// let id_str = id.as_str();
+    /// let parsed: sparkid::SparkIdStr = id_str.to_string().parse().unwrap();
+    /// assert_eq!(id_str, parsed);
+    /// ```
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let bytes = s.as_bytes();
+        if bytes.len() != ID_LENGTH {
+            return Err(ParseSparkIdError {
+                kind: ParseErrorKind::InvalidLength(bytes.len()),
+            });
+        }
+        for (position, &byte) in bytes.iter().enumerate() {
+            if DECODE[byte as usize] == INVALID_INDEX {
+                return Err(ParseSparkIdError {
+                    kind: ParseErrorKind::InvalidChar { byte, position },
+                });
+            }
+        }
+        Ok(SparkIdStr(bytes.try_into().unwrap()))
+    }
+}
+
+impl<'a> TryFrom<&'a str> for SparkIdStr {
+    type Error = ParseSparkIdError;
+
+    fn try_from(s: &'a str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// serde impls
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "serde")]
+mod serde_support {
+    use super::{SparkId, SparkIdStr, ID_LENGTH, PACKED_BYTE_COUNT};
+    use core::fmt;
+    use serde::de::{self, Visitor};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    // -- SparkId --------------------------------------------------------------
+
+    impl Serialize for SparkId {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            if serializer.is_human_readable() {
+                serializer.serialize_str(&self.as_str())
+            } else {
+                self.to_bytes().serialize(serializer)
+            }
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SparkId {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            if deserializer.is_human_readable() {
+                struct SparkIdStringVisitor;
+
+                impl<'de> Visitor<'de> for SparkIdStringVisitor {
+                    type Value = SparkId;
+
+                    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        write!(formatter, "a {ID_LENGTH}-char Base58 SparkId string")
+                    }
+
+                    fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkId, E> {
+                        value.parse().map_err(de::Error::custom)
+                    }
+                }
+
+                deserializer.deserialize_str(SparkIdStringVisitor)
+            } else {
+                let bytes = <[u8; PACKED_BYTE_COUNT]>::deserialize(deserializer)?;
+                SparkId::from_bytes(bytes).map_err(de::Error::custom)
+            }
+        }
+    }
+
+    // -- SparkIdStr -----------------------------------------------------------
+
+    impl Serialize for SparkIdStr {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            serializer.serialize_str(self)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for SparkIdStr {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            struct SparkIdStrVisitor;
+
+            impl<'de> Visitor<'de> for SparkIdStrVisitor {
+                type Value = SparkIdStr;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    write!(formatter, "a {ID_LENGTH}-char Base58 SparkId string")
+                }
+
+                fn visit_str<E: de::Error>(self, value: &str) -> Result<SparkIdStr, E> {
+                    value.parse().map_err(de::Error::custom)
+                }
+            }
+
+            deserializer.deserialize_str(SparkIdStrVisitor)
+        }
+    }
+}
+
 /// Generates 21-char, Base58, time-sortable, collision-resistant unique IDs.
 ///
 /// Each ID is composed of three parts:
