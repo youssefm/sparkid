@@ -456,8 +456,7 @@ impl FromStr for SparkIdStr {
                 });
             }
         }
-        let mut out = [0u8; ID_LENGTH];
-        out.copy_from_slice(bytes);
+        let out: [u8; ID_LENGTH] = bytes.try_into().unwrap();
         Ok(SparkIdStr(out))
     }
 }
