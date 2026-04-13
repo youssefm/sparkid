@@ -4,19 +4,18 @@ import time
 import weakref
 from datetime import datetime, timezone
 
-# Base58 alphabet — excludes visually ambiguous characters (0, O, I, l)
-ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-BASE = len(ALPHABET)  # 58
+from sparkid._constants import (
+    ALPHABET,
+    BASE,
+    COUNTER_CHAR_COUNT,
+    ID_LENGTH,
+    RANDOM_CHAR_COUNT,
+    TIMESTAMP_CHAR_COUNT,
+)
 
-# ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
-_TIMESTAMP_CHAR_COUNT = 8
-_COUNTER_CHAR_COUNT = 6
-_RANDOM_CHAR_COUNT = 7
-_ID_LENGTH = _TIMESTAMP_CHAR_COUNT + _COUNTER_CHAR_COUNT + _RANDOM_CHAR_COUNT
-
-_COUNTER_HEAD_CHAR_COUNT = _COUNTER_CHAR_COUNT - 1  # 5
+_COUNTER_HEAD_CHAR_COUNT = COUNTER_CHAR_COUNT - 1  # 5
 _COUNTER_HEAD_LAST_INDEX = _COUNTER_HEAD_CHAR_COUNT - 1  # 4
-_PREFIX_COUNTER_HEAD_LENGTH = _TIMESTAMP_CHAR_COUNT + _COUNTER_HEAD_CHAR_COUNT  # 13
+_PREFIX_COUNTER_HEAD_LENGTH = TIMESTAMP_CHAR_COUNT + _COUNTER_HEAD_CHAR_COUNT  # 13
 
 # How many random bytes to fetch per batch. After rejection sampling,
 # ~90.6% survive (58/64), yielding ~232 valid chars.
@@ -147,11 +146,11 @@ class IdGenerator:
 
         # Refresh the random tail from the pre-sampled buffer.
         position = self._random_byte_position
-        end = position + _RANDOM_CHAR_COUNT
+        end = position + RANDOM_CHAR_COUNT
         if end > self._random_byte_len:
             self._refill_random()
             position = 0
-            end = _RANDOM_CHAR_COUNT
+            end = RANDOM_CHAR_COUNT
         self._random_byte_position = end
 
         return (
@@ -163,16 +162,16 @@ class IdGenerator:
     def _seed_counter(self) -> None:
         """Seed the counter from the random byte buffer."""
         position = self._random_byte_position
-        end = position + _COUNTER_CHAR_COUNT
+        end = position + COUNTER_CHAR_COUNT
         if end > self._random_byte_len:
             self._refill_random()
             position = 0
-            end = _COUNTER_CHAR_COUNT
+            end = COUNTER_CHAR_COUNT
         self._random_byte_position = end
         counter_bytes = self._random_byte_buffer[position:end]
         self._counter_head_buf[:] = counter_bytes[:_COUNTER_HEAD_CHAR_COUNT]
         self._prefix_plus_counter_head = self._prefix_plus_counter_head[
-            :_TIMESTAMP_CHAR_COUNT
+            :TIMESTAMP_CHAR_COUNT
         ] + counter_bytes[:_COUNTER_HEAD_CHAR_COUNT].decode("ascii")
         self._counter_tail = chr(counter_bytes[_COUNTER_HEAD_CHAR_COUNT])
 
@@ -192,7 +191,7 @@ class IdGenerator:
                 buf[i] = nxt
                 self._counter_tail = _FIRST_CHAR
                 self._prefix_plus_counter_head = self._prefix_plus_counter_head[
-                    :_TIMESTAMP_CHAR_COUNT
+                    :TIMESTAMP_CHAR_COUNT
                 ] + buf.decode("ascii")
                 return
             buf[i] = _FIRST_BYTE
@@ -223,7 +222,7 @@ class IdGenerator:
         )
         # Update the prefix, preserving the counter head portion.
         self._prefix_plus_counter_head = (
-            ts_prefix + self._prefix_plus_counter_head[_TIMESTAMP_CHAR_COUNT:]
+            ts_prefix + self._prefix_plus_counter_head[TIMESTAMP_CHAR_COUNT:]
         )
 
     def _refill_random(self) -> None:
@@ -286,9 +285,9 @@ def extract_timestamp(id: str) -> datetime:
     """
     if not isinstance(id, str):
         raise ValueError("extract_timestamp: expected a string argument")
-    if len(id) != _ID_LENGTH:
+    if len(id) != ID_LENGTH:
         raise ValueError(
-            f"extract_timestamp: expected a {_ID_LENGTH}-character string,"
+            f"extract_timestamp: expected a {ID_LENGTH}-character string,"
             f" got {len(id)}"
         )
     index = _BASE58_INDEX
@@ -298,6 +297,6 @@ def extract_timestamp(id: str) -> datetime:
                 f"extract_timestamp: invalid Base58 character {ch!r} at position {i}"
             )
     ms = 0
-    for ch in id[:_TIMESTAMP_CHAR_COUNT]:
+    for ch in id[:TIMESTAMP_CHAR_COUNT]:
         ms = ms * BASE + index[ch]
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)

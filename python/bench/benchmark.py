@@ -10,7 +10,7 @@ from collections.abc import Callable
 if sys.version_info < (3, 14):
     sys.exit("benchmark requires Python 3.14+ (for stdlib uuid.uuid7)")
 
-from sparkid import IdGenerator
+from sparkid import IdGenerator, from_bytes, to_bytes
 
 generate_id = IdGenerator()
 
@@ -262,12 +262,67 @@ def run_comparison() -> None:
     print()
 
 
+def benchmark_binary() -> None:
+    """Benchmark binary encoding/decoding."""
+    print()
+    print("=== Binary Encoding ===")
+    print()
+
+    # Pre-generate IDs for to_bytes benchmark
+    ids = [generate_id() for _ in range(ITERATIONS)]
+
+    # Pre-generate binary for from_bytes benchmark
+    binaries = [to_bytes(id_) for id_ in ids]
+
+    # Warm up
+    for i in range(WARMUP):
+        to_bytes(ids[i % ITERATIONS])
+        from_bytes(binaries[i % ITERATIONS])
+
+    # Benchmark to_bytes
+    to_bytes_results: list[float] = []
+    for _ in range(TRIALS):
+        start = time.perf_counter_ns()
+        for i in range(ITERATIONS):
+            to_bytes(ids[i])
+        elapsed_ns = time.perf_counter_ns() - start
+        to_bytes_results.append(elapsed_ns / ITERATIONS / 1_000)
+    to_bytes_results.sort()
+    to_bytes_median = to_bytes_results[len(to_bytes_results) // 2]
+    throughput = round(1_000_000 / to_bytes_median)
+    print(
+        f"  to_bytes:   {to_bytes_median:.3f} µs/call"
+        f"  {throughput:,} ops/sec"
+    )
+
+    # Benchmark from_bytes
+    from_bytes_results: list[float] = []
+    for _ in range(TRIALS):
+        start = time.perf_counter_ns()
+        for i in range(ITERATIONS):
+            from_bytes(binaries[i])
+        elapsed_ns = time.perf_counter_ns() - start
+        from_bytes_results.append(elapsed_ns / ITERATIONS / 1_000)
+    from_bytes_results.sort()
+    from_bytes_median = from_bytes_results[len(from_bytes_results) // 2]
+    throughput = round(1_000_000 / from_bytes_median)
+    print(
+        f"  from_bytes: {from_bytes_median:.3f} µs/call"
+        f"  {throughput:,} ops/sec"
+    )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark sparkid")
     parser.add_argument(
         "--compare",
         action="store_true",
         help="Compare sparkid against other ID generators",
+    )
+    parser.add_argument(
+        "--binary",
+        action="store_true",
+        help="Benchmark binary encoding/decoding",
     )
     args = parser.parse_args()
 
@@ -278,5 +333,7 @@ if __name__ == "__main__":
     verify()
     if args.compare:
         run_comparison()
+    elif args.binary:
+        benchmark_binary()
     else:
         benchmark()

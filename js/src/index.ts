@@ -1,12 +1,11 @@
-// Base58 alphabet — excludes visually ambiguous characters (0, O, I, l)
-const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-const BASE = ALPHABET.length; // 58
-
-// ID structure: [8-char timestamp][6-char counter][7-char random] = 21 chars
-const TIMESTAMP_CHAR_COUNT = 8;
-const COUNTER_CHAR_COUNT = 6;
-const RANDOM_CHAR_COUNT = 7;
-const ID_LENGTH = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT + RANDOM_CHAR_COUNT;
+import {
+  ALPHABET,
+  BASE,
+  TIMESTAMP_CHAR_COUNT,
+  COUNTER_CHAR_COUNT,
+  RANDOM_CHAR_COUNT,
+  ID_LENGTH,
+} from "./constants";
 
 // How many random bytes to fetch per batch. After rejection sampling,
 // ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).

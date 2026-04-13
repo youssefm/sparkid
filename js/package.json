@@ -9,6 +9,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./binary": {
+      "types": "./dist/binary.d.ts",
+      "import": "./dist/binary.mjs",
+      "require": "./dist/binary.js"
     }
   },
   "files": [
@@ -21,7 +26,8 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "bench": "tsx bench/benchmark.ts",
-    "bench:compare": "tsx bench/benchmark.ts --compare"
+    "bench:compare": "tsx bench/benchmark.ts --compare",
+    "bench:binary": "tsx bench/benchmark.ts --binary"
   },
   "keywords": [
     "id",
