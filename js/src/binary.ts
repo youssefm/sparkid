@@ -13,12 +13,10 @@ const INVALID_INDEX = 0xff;
 const DECODE = new Uint8Array(128).fill(INVALID_INDEX);
 for (let i = 0; i < BASE; i++) DECODE[ALPHABET.charCodeAt(i)] = i;
 
-// Validation lookup: 1 if index is valid (0-57), 0 otherwise. 64 entries for 6-bit range.
-const VALID_INDEX = new Uint8Array(64);
-for (let i = 0; i < BASE; i++) VALID_INDEX[i] = 1;
-
-// Forward lookup: Base58 index (0-57) -> character code.
-const ENCODE = new Uint8Array(BASE);
+// Forward lookup: Base58 index (0-57) -> character code, 0 for invalid (58-63).
+// Used for both encoding and validation: valid char codes are all >= 49,
+// so (code - 1) is non-negative for valid and -1 for invalid (0).
+const ENCODE = new Uint8Array(64);
 for (let i = 0; i < BASE; i++) ENCODE[i] = ALPHABET.charCodeAt(i);
 
 /**
@@ -178,13 +176,36 @@ export function fromBytes(bytes: Uint8Array): string {
   const a19 = bytes[14] & INDEX_MASK;
   const a20 = (bytes[15] >>> TAIL_SHIFT) & INDEX_MASK;
 
-  const v = VALID_INDEX;
+  const e = ENCODE;
+  const e0 = e[a0];
+  const e1 = e[a1];
+  const e2 = e[a2];
+  const e3 = e[a3];
+  const e4 = e[a4];
+  const e5 = e[a5];
+  const e6 = e[a6];
+  const e7 = e[a7];
+  const e8 = e[a8];
+  const e9 = e[a9];
+  const e10 = e[a10];
+  const e11 = e[a11];
+  const e12 = e[a12];
+  const e13 = e[a13];
+  const e14 = e[a14];
+  const e15 = e[a15];
+  const e16 = e[a16];
+  const e17 = e[a17];
+  const e18 = e[a18];
+  const e19 = e[a19];
+  const e20 = e[a20];
+
+  // Valid char codes are >= 49; invalid slots are 0. Subtracting 1 from 0
+  // gives -1 whose sign bit propagates through OR, making the result < 0.
   if (
-    !(
-      v[a0] & v[a1] & v[a2] & v[a3] & v[a4] & v[a5] & v[a6] & v[a7] &
-      v[a8] & v[a9] & v[a10] & v[a11] & v[a12] & v[a13] & v[a14] &
-      v[a15] & v[a16] & v[a17] & v[a18] & v[a19] & v[a20]
-    )
+    ((e0 - 1) | (e1 - 1) | (e2 - 1) | (e3 - 1) | (e4 - 1) | (e5 - 1) |
+      (e6 - 1) | (e7 - 1) | (e8 - 1) | (e9 - 1) | (e10 - 1) | (e11 - 1) |
+      (e12 - 1) | (e13 - 1) | (e14 - 1) | (e15 - 1) | (e16 - 1) |
+      (e17 - 1) | (e18 - 1) | (e19 - 1) | (e20 - 1)) < 0
   ) {
     throw new RangeError("invalid 6-bit index in binary SparkId");
   }
@@ -193,11 +214,10 @@ export function fromBytes(bytes: Uint8Array): string {
     throw new RangeError("non-zero padding bits in binary SparkId");
   }
 
-  const e = ENCODE;
   return String.fromCharCode(
-    e[a0], e[a1], e[a2], e[a3], e[a4], e[a5], e[a6],
-    e[a7], e[a8], e[a9], e[a10], e[a11], e[a12],
-    e[a13], e[a14], e[a15], e[a16], e[a17], e[a18],
-    e[a19], e[a20],
+    e0, e1, e2, e3, e4, e5, e6,
+    e7, e8, e9, e10, e11, e12,
+    e13, e14, e15, e16, e17, e18,
+    e19, e20,
   );
 }

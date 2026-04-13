@@ -14,8 +14,9 @@ _DECODE = [_INVALID_INDEX] * 128
 for _i, _c in enumerate(ALPHABET):
     _DECODE[ord(_c)] = _i
 
-# Validation lookup: True if index is valid (0-57).
-_VALID_INDEX = [i < BASE for i in range(64)]
+# Forward lookup: Base58 index (0-57) -> character, "" for invalid (58-63).
+# Used for both encoding and validation: single chars are truthy, "" is falsy.
+_ENCODE = list(ALPHABET) + [""] * (64 - BASE)
 
 
 def to_bytes(id_string: str) -> bytes:
@@ -151,13 +152,36 @@ def from_bytes(data: bytes) -> str:
     a19 = data[14] & _INDEX_MASK
     a20 = (data[15] >> _TAIL_SHIFT) & _INDEX_MASK
 
-    v = _VALID_INDEX
+    e = _ENCODE
+    e0 = e[a0]
+    e1 = e[a1]
+    e2 = e[a2]
+    e3 = e[a3]
+    e4 = e[a4]
+    e5 = e[a5]
+    e6 = e[a6]
+    e7 = e[a7]
+    e8 = e[a8]
+    e9 = e[a9]
+    e10 = e[a10]
+    e11 = e[a11]
+    e12 = e[a12]
+    e13 = e[a13]
+    e14 = e[a14]
+    e15 = e[a15]
+    e16 = e[a16]
+    e17 = e[a17]
+    e18 = e[a18]
+    e19 = e[a19]
+    e20 = e[a20]
+
+    # Valid chars are truthy single-char strings; invalid slots are "" (falsy).
     if not (
-        v[a0] and v[a1] and v[a2] and v[a3] and v[a4]
-        and v[a5] and v[a6] and v[a7] and v[a8] and v[a9]
-        and v[a10] and v[a11] and v[a12] and v[a13] and v[a14]
-        and v[a15] and v[a16] and v[a17] and v[a18] and v[a19]
-        and v[a20]
+        e0 and e1 and e2 and e3 and e4
+        and e5 and e6 and e7 and e8 and e9
+        and e10 and e11 and e12 and e13 and e14
+        and e15 and e16 and e17 and e18 and e19
+        and e20
     ):
         raise ValueError(
             "invalid 6-bit index in binary SparkId"
@@ -168,10 +192,9 @@ def from_bytes(data: bytes) -> str:
             "non-zero padding bits in binary SparkId"
         )
 
-    e = ALPHABET
     return "".join((
-        e[a0], e[a1], e[a2], e[a3], e[a4], e[a5], e[a6],
-        e[a7], e[a8], e[a9], e[a10], e[a11], e[a12],
-        e[a13], e[a14], e[a15], e[a16], e[a17], e[a18],
-        e[a19], e[a20],
+        e0, e1, e2, e3, e4, e5, e6,
+        e7, e8, e9, e10, e11, e12,
+        e13, e14, e15, e16, e17, e18,
+        e19, e20,
     ))
