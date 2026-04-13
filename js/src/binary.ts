@@ -199,14 +199,9 @@ export function fromBytes(bytes: Uint8Array): string {
   const e19 = e[a19];
   const e20 = e[a20];
 
-  // Valid char codes are >= 49; invalid slots are 0. Subtracting 1 from 0
-  // gives -1 whose sign bit propagates through OR, making the result < 0.
-  if (
-    ((e0 - 1) | (e1 - 1) | (e2 - 1) | (e3 - 1) | (e4 - 1) | (e5 - 1) |
-      (e6 - 1) | (e7 - 1) | (e8 - 1) | (e9 - 1) | (e10 - 1) | (e11 - 1) |
-      (e12 - 1) | (e13 - 1) | (e14 - 1) | (e15 - 1) | (e16 - 1) |
-      (e17 - 1) | (e18 - 1) | (e19 - 1) | (e20 - 1)) < 0
-  ) {
+  // Valid char codes are >= 49; invalid slots are 0.
+  if (Math.min(e0, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10,
+    e11, e12, e13, e14, e15, e16, e17, e18, e19, e20) === 0) {
     throw new RangeError("invalid 6-bit index in binary SparkId");
   }
 
