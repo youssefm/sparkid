@@ -64,7 +64,7 @@ export function toBytes(id: string): Uint8Array {
   const c19 = id.charCodeAt(19);
   const c20 = id.charCodeAt(20);
 
-  // Reject any character outside 0-255 before DECODE lookup.
+  // Reject any character outside 0-127 before DECODE lookup.
   if (
     (c0 | c1 | c2 | c3 | c4 | c5 | c6 | c7 | c8 | c9 | c10 |
       c11 | c12 | c13 | c14 | c15 | c16 | c17 | c18 | c19 | c20) >
@@ -195,26 +195,9 @@ export function fromBytes(bytes: Uint8Array): string {
 
   const e = ENCODE;
   return String.fromCharCode(
-    e[a0],
-    e[a1],
-    e[a2],
-    e[a3],
-    e[a4],
-    e[a5],
-    e[a6],
-    e[a7],
-    e[a8],
-    e[a9],
-    e[a10],
-    e[a11],
-    e[a12],
-    e[a13],
-    e[a14],
-    e[a15],
-    e[a16],
-    e[a17],
-    e[a18],
-    e[a19],
-    e[a20],
+    e[a0], e[a1], e[a2], e[a3], e[a4], e[a5], e[a6],
+    e[a7], e[a8], e[a9], e[a10], e[a11], e[a12],
+    e[a13], e[a14], e[a15], e[a16], e[a17], e[a18],
+    e[a19], e[a20],
   );
 }
