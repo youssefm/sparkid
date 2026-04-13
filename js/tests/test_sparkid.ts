@@ -3,7 +3,8 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { generateId, extractTimestamp, toBytes, fromBytes } from "../src/index.ts";
+import { generateId, extractTimestamp } from "../src/index.ts";
+import { toBytes, fromBytes } from "../src/binary.ts";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE = ALPHABET.length; // 58
@@ -520,10 +521,16 @@ describe("Public API", () => {
     assert.equal(typeof generateId(), "string");
   });
 
-  it("generateId is the only named export", async () => {
+  it("generateId and extractTimestamp are the named exports", async () => {
     const mod = await import("../src/index.ts");
     const exports = Object.keys(mod);
-    assert.deepEqual(exports.sort(), ["extractTimestamp", "fromBytes", "generateId", "toBytes"]);
+    assert.deepEqual(exports.sort(), ["extractTimestamp", "generateId"]);
+  });
+
+  it("binary module exports toBytes and fromBytes", async () => {
+    const mod = await import("../src/binary.ts");
+    const exports = Object.keys(mod);
+    assert.deepEqual(exports.sort(), ["fromBytes", "toBytes"]);
   });
 });
 

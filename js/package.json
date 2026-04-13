@@ -9,6 +9,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./binary": {
+      "types": "./dist/binary.d.ts",
+      "import": "./dist/binary.mjs",
+      "require": "./dist/binary.js"
     }
   },
   "files": [

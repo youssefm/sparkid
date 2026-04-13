@@ -12,10 +12,9 @@ const BYTE_MASK = 0xff;
 const PADDING_MASK = 0x03;
 const TAIL_SHIFT = 2;
 const INVALID_INDEX = 0xff;
-const ASCII_TABLE_SIZE = 128;
 
-// Reverse lookup: ASCII char code -> Base58 index (0-57), or 0xFF if invalid.
-const DECODE = new Uint8Array(ASCII_TABLE_SIZE).fill(INVALID_INDEX);
+// Reverse lookup: byte value -> Base58 index (0-57), or 0xFF if invalid.
+const DECODE = new Uint8Array(256).fill(INVALID_INDEX);
 for (let i = 0; i < BASE; i++) DECODE[ALPHABET.charCodeAt(i)] = i;
 
 /**
@@ -44,7 +43,7 @@ export function toBytes(id: string): Uint8Array {
   // Validate all characters before packing.
   for (let i = 0; i < ID_LENGTH; i++) {
     const charCode = id.charCodeAt(i);
-    if (charCode >= ASCII_TABLE_SIZE || d[charCode] === INVALID_INDEX) {
+    if (charCode > BYTE_MASK || d[charCode] === INVALID_INDEX) {
       throw new RangeError(
         `invalid character '${id[i]}' at position ${i} in SparkId`,
       );

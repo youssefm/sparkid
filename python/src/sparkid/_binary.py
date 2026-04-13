@@ -12,10 +12,9 @@ _BYTE_MASK = 0xFF
 _PADDING_MASK = 0x03
 _TAIL_SHIFT = 2
 _INVALID_INDEX = 0xFF
-_ASCII_TABLE_SIZE = 128
 
-# Reverse lookup: ASCII code point -> Base58 index (0-57), or 0xFF if invalid.
-_DECODE = [_INVALID_INDEX] * _ASCII_TABLE_SIZE
+# Reverse lookup: byte value -> Base58 index (0-57), or 0xFF if invalid.
+_DECODE = [_INVALID_INDEX] * 256
 for _i, _c in enumerate(ALPHABET):
     _DECODE[ord(_c)] = _i
 
