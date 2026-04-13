@@ -139,7 +139,7 @@ def run_rust() -> str:
         print(f"   ⚠ {exc}", file=sys.stderr)
         return ""
     result = subprocess.run(
-        [cargo, "bench", "--bench", "benchmark"],
+        [cargo, "bench", "--bench", "benchmark", "--", "id_generators"],
         cwd=RUST_DIR,
         capture_output=True,
         text=True,
