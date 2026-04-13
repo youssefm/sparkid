@@ -6,7 +6,7 @@ import time
 from collections import Counter
 from unittest.mock import patch
 
-from sparkid import IdGenerator, extract_timestamp, generate_id
+from sparkid import IdGenerator, extract_timestamp, from_bytes, generate_id, to_bytes
 from sparkid._generator import (
     _FIRST_CHAR,
     ALPHABET,
@@ -610,8 +610,16 @@ class TestPublicAPI:
 
         assert hasattr(sparkid, "generate_id")
         assert hasattr(sparkid, "extract_timestamp")
+        assert hasattr(sparkid, "to_bytes")
+        assert hasattr(sparkid, "from_bytes")
         assert hasattr(sparkid, "IdGenerator")
-        assert sparkid.__all__ == ["generate_id", "extract_timestamp", "IdGenerator"]
+        assert sparkid.__all__ == [
+            "generate_id",
+            "extract_timestamp",
+            "to_bytes",
+            "from_bytes",
+            "IdGenerator",
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -661,3 +669,125 @@ class TestExtractTimestamp:
             extract_timestamp("O" + "1" * 20)
         with pytest.raises(ValueError):
             extract_timestamp("I" + "1" * 20)
+
+
+# ---------------------------------------------------------------------------
+# Binary encoding (to_bytes / from_bytes)
+# ---------------------------------------------------------------------------
+
+
+class TestToFromBytes:
+    def test_round_trip(self):
+        gen = IdGenerator()
+        for _ in range(10_000):
+            sparkid = gen()
+            assert from_bytes(to_bytes(sparkid)) == sparkid
+
+    def test_produces_16_bytes(self):
+        gen = IdGenerator()
+        for _ in range(100):
+            assert len(to_bytes(gen())) == 16
+
+    def test_padding_bits_always_zero(self):
+        gen = IdGenerator()
+        for _ in range(1000):
+            binary = to_bytes(gen())
+            assert binary[15] & 0x03 == 0, "last 2 bits must be zero padding"
+
+    def test_sort_order_preserved(self):
+        gen = IdGenerator()
+        ids = [gen() for _ in range(1000)]
+        for i in range(1, len(ids)):
+            binary_a = to_bytes(ids[i - 1])
+            binary_b = to_bytes(ids[i])
+            assert binary_a < binary_b, f"binary sort mismatch at index {i}"
+
+    def test_sort_order_across_millisecond_boundaries(self):
+        gen = IdGenerator()
+        batch_a = sorted([gen() for _ in range(50)])
+        time.sleep(0.03)
+        batch_b = sorted([gen() for _ in range(50)])
+        max_binary_a = to_bytes(batch_a[-1])
+        min_binary_b = to_bytes(batch_b[0])
+        assert max_binary_a < min_binary_b
+
+    def test_all_alphabet_characters(self):
+        for char in ALPHABET:
+            sparkid = char + "1" * 20
+            binary = to_bytes(sparkid)
+            recovered = from_bytes(binary)
+            assert recovered == sparkid, f"round-trip failed for char {char!r}"
+
+    def test_deterministic(self):
+        gen = IdGenerator()
+        sparkid = gen()
+        assert to_bytes(sparkid) == to_bytes(sparkid)
+
+
+class TestToBytesValidation:
+    def test_wrong_length(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            to_bytes("abc")
+        with pytest.raises(ValueError):
+            to_bytes("1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes("1" * 22)
+        with pytest.raises(ValueError):
+            to_bytes("")
+
+    def test_invalid_characters(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            to_bytes("0" + "1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes("O" + "1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes("I" + "1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes("l" + "1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes("!" + "1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes(" " + "1" * 20)
+
+    def test_non_ascii_characters(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            to_bytes("ñ" + "1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes("é" + "1" * 20)
+        with pytest.raises(ValueError):
+            to_bytes("💎" + "1" * 19)
+
+
+class TestFromBytesValidation:
+    def test_wrong_length(self):
+        import pytest
+
+        with pytest.raises(ValueError):
+            from_bytes(b"\x00" * 15)
+        with pytest.raises(ValueError):
+            from_bytes(b"\x00" * 17)
+        with pytest.raises(ValueError):
+            from_bytes(b"")
+
+    def test_out_of_range_index(self):
+        import pytest
+
+        bad = bytearray(16)
+        bad[0] = 0xFF  # first 6-bit index = 63, which is >= 58
+        with pytest.raises(ValueError):
+            from_bytes(bytes(bad))
+
+    def test_non_zero_padding(self):
+        import pytest
+
+        sparkid = "1" * 21
+        binary = bytearray(to_bytes(sparkid))
+        binary[15] = binary[15] | 0x01  # set lowest bit
+        with pytest.raises(ValueError):
+            from_bytes(bytes(binary))

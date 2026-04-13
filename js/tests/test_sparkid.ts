@@ -3,7 +3,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { generateId, extractTimestamp } from "../src/index.ts";
+import { generateId, extractTimestamp, toBytes, fromBytes } from "../src/index.ts";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE = ALPHABET.length; // 58
@@ -379,6 +379,139 @@ describe("Stress test", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Binary encoding (toBytes / fromBytes)
+// ---------------------------------------------------------------------------
+
+describe("toBytes / fromBytes", () => {
+  it("round-trips: fromBytes(toBytes(id)) === id", () => {
+    for (let i = 0; i < 10_000; i++) {
+      const id = generateId();
+      const bin = toBytes(id);
+      assert.equal(fromBytes(bin), id);
+    }
+  });
+
+  it("produces exactly 16 bytes", () => {
+    for (let i = 0; i < 100; i++) {
+      assert.equal(toBytes(generateId()).length, 16);
+    }
+  });
+
+  it("padding bits are always zero", () => {
+    for (let i = 0; i < 1000; i++) {
+      const bin = toBytes(generateId());
+      assert.equal(bin[15] & 0x03, 0, "last 2 bits must be zero padding");
+    }
+  });
+
+  it("sort order is preserved (binary memcmp matches string comparison)", () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 1000; i++) {
+      ids.push(generateId());
+    }
+    // Compare all consecutive pairs
+    for (let i = 1; i < ids.length; i++) {
+      const binA = toBytes(ids[i - 1]);
+      const binB = toBytes(ids[i]);
+      // Since ids are monotonic, binA < binB (lexicographic byte compare)
+      let cmp = 0;
+      for (let j = 0; j < 16; j++) {
+        if (binA[j] !== binB[j]) {
+          cmp = binA[j] < binB[j] ? -1 : 1;
+          break;
+        }
+      }
+      assert.equal(cmp, -1, `binary sort mismatch at index ${i}`);
+    }
+  });
+
+  it("sort order preserved across millisecond boundaries", async () => {
+    const batchA: string[] = [];
+    for (let i = 0; i < 50; i++) batchA.push(generateId());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const batchB: string[] = [];
+    for (let i = 0; i < 50; i++) batchB.push(generateId());
+
+    const maxBinA = toBytes(batchA.sort()[batchA.length - 1]);
+    const minBinB = toBytes(batchB.sort()[0]);
+    let cmp = 0;
+    for (let j = 0; j < 16; j++) {
+      if (maxBinA[j] !== minBinB[j]) {
+        cmp = maxBinA[j] < minBinB[j] ? -1 : 1;
+        break;
+      }
+    }
+    assert.equal(cmp, -1, "binary sort mismatch across ms boundaries");
+  });
+
+  it("all 58 alphabet characters encode and decode correctly", () => {
+    // Build a synthetic valid ID for each character in position 0
+    for (let i = 0; i < 58; i++) {
+      const id = ALPHABET[i] + "1".repeat(20);
+      const bin = toBytes(id);
+      const recovered = fromBytes(bin);
+      assert.equal(recovered, id, `round-trip failed for char '${ALPHABET[i]}'`);
+    }
+  });
+
+  it("deterministic: same input always produces same binary", () => {
+    const id = generateId();
+    const bin1 = toBytes(id);
+    const bin2 = toBytes(id);
+    assert.deepEqual(bin1, bin2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toBytes validation
+// ---------------------------------------------------------------------------
+
+describe("toBytes validation", () => {
+  it("throws RangeError for wrong length", () => {
+    assert.throws(() => toBytes("abc"), RangeError);
+    assert.throws(() => toBytes("1".repeat(20)), RangeError);
+    assert.throws(() => toBytes("1".repeat(22)), RangeError);
+    assert.throws(() => toBytes(""), RangeError);
+  });
+
+  it("throws RangeError for invalid characters", () => {
+    assert.throws(() => toBytes("0" + "1".repeat(20)), RangeError);
+    assert.throws(() => toBytes("O" + "1".repeat(20)), RangeError);
+    assert.throws(() => toBytes("I" + "1".repeat(20)), RangeError);
+    assert.throws(() => toBytes("l" + "1".repeat(20)), RangeError);
+    assert.throws(() => toBytes("!" + "1".repeat(20)), RangeError);
+    assert.throws(() => toBytes(" " + "1".repeat(20)), RangeError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fromBytes validation
+// ---------------------------------------------------------------------------
+
+describe("fromBytes validation", () => {
+  it("throws RangeError for wrong length", () => {
+    assert.throws(() => fromBytes(new Uint8Array(15)), RangeError);
+    assert.throws(() => fromBytes(new Uint8Array(17)), RangeError);
+    assert.throws(() => fromBytes(new Uint8Array(0)), RangeError);
+  });
+
+  it("throws RangeError for out-of-range 6-bit indices", () => {
+    // Set first 6-bit field to 63 (>= 58)
+    const bad = new Uint8Array(16);
+    bad[0] = 0xff; // first index = 63
+    assert.throws(() => fromBytes(bad), RangeError);
+  });
+
+  it("throws RangeError for non-zero padding", () => {
+    // Valid ID packed, then corrupt padding bits
+    const id = "1".repeat(21);
+    const bin = toBytes(id);
+    bin[15] = bin[15] | 0x01; // set lowest bit
+    assert.throws(() => fromBytes(bin), RangeError);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -390,7 +523,7 @@ describe("Public API", () => {
   it("generateId is the only named export", async () => {
     const mod = await import("../src/index.ts");
     const exports = Object.keys(mod);
-    assert.deepEqual(exports.sort(), ["extractTimestamp", "generateId"]);
+    assert.deepEqual(exports.sort(), ["extractTimestamp", "fromBytes", "generateId", "toBytes"]);
   });
 });
 
