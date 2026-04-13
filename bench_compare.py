@@ -16,6 +16,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as mticker
+except ImportError as exc:  # pragma: no cover
+    sys.exit(f"Missing dependency: {exc}. Run: pip install matplotlib")
+
 REPO_ROOT = Path(__file__).parent
 JS_DIR = REPO_ROOT / "js"
 PYTHON_DIR = REPO_ROOT / "python"
@@ -293,15 +302,6 @@ def make_chart(
     rust: dict[str, float],
     out: str,
 ) -> None:
-    try:
-        import matplotlib
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        import matplotlib.ticker as mticker
-    except ImportError as exc:  # pragma: no cover
-        sys.exit(f"Missing dependency: {exc}. Run: pip install matplotlib")
-
     all_names = set(js) | set(py) | set(rust)
     names = _order_names(all_names)  # stable ordering → stable colours
 
@@ -454,7 +454,7 @@ def make_chart(
         color=MUTED,
     )
 
-    plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.4, facecolor=fig.get_facecolor())
     plt.close(fig)
     print(f"\n✅  Chart saved → {out}")
 
