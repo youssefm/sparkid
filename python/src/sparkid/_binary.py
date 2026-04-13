@@ -175,26 +175,20 @@ def from_bytes(data: bytes) -> str:
     e19 = e[a19]
     e20 = e[a20]
 
-    # Valid chars are truthy single-char strings; invalid slots are "" (falsy).
-    if not (
-        e0 and e1 and e2 and e3 and e4
-        and e5 and e6 and e7 and e8 and e9
-        and e10 and e11 and e12 and e13 and e14
-        and e15 and e16 and e17 and e18 and e19
-        and e20
-    ):
-        raise ValueError(
-            "invalid 6-bit index in binary SparkId"
-        )
-
     if (data[15] & _PADDING_MASK) != 0:
         raise ValueError(
             "non-zero padding bits in binary SparkId"
         )
 
-    return "".join((
+    # Invalid indices map to "" in _ENCODE, making the result shorter than 21.
+    result = "".join((
         e0, e1, e2, e3, e4, e5, e6,
         e7, e8, e9, e10, e11, e12,
         e13, e14, e15, e16, e17, e18,
         e19, e20,
     ))
+    if len(result) != ID_LENGTH:
+        raise ValueError(
+            "invalid 6-bit index in binary SparkId"
+        )
+    return result
