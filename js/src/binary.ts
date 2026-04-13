@@ -1,4 +1,4 @@
-import { ALPHABET, BASE, ID_LENGTH } from "./constants.ts";
+import { ALPHABET, BASE, ID_LENGTH } from "./constants";
 
 // Binary encoding constants
 const BINARY_LENGTH = 16;

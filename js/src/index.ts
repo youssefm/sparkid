@@ -5,9 +5,9 @@ import {
   COUNTER_CHAR_COUNT,
   RANDOM_CHAR_COUNT,
   ID_LENGTH,
-} from "./constants.ts";
+} from "./constants";
 
-export { toBytes, fromBytes } from "./binary.ts";
+export { toBytes, fromBytes } from "./binary";
 
 // How many random bytes to fetch per batch. After rejection sampling,
 // ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
