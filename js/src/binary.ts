@@ -154,6 +154,10 @@ export function fromBytes(bytes: Uint8Array): string {
       `invalid binary length: expected ${BINARY_LENGTH}, got ${bytes.length}`,
     );
 
+  if ((bytes[15] & PADDING_MASK) !== 0) {
+    throw new RangeError("non-zero padding bits in binary SparkId");
+  }
+
   const a0 = (bytes[0] >>> 2) & INDEX_MASK;
   const a1 = ((bytes[0] & 0x3) << 4) | (bytes[1] >>> 4);
   const a2 = ((bytes[1] & 0xf) << 2) | (bytes[2] >>> 6);
@@ -203,10 +207,6 @@ export function fromBytes(bytes: Uint8Array): string {
   if (Math.min(e0, e1, e2, e3, e4, e5, e6, e7, e8, e9, e10,
     e11, e12, e13, e14, e15, e16, e17, e18, e19, e20) === 0) {
     throw new RangeError("invalid 6-bit index in binary SparkId");
-  }
-
-  if ((bytes[15] & PADDING_MASK) !== 0) {
-    throw new RangeError("non-zero padding bits in binary SparkId");
   }
 
   return String.fromCharCode(

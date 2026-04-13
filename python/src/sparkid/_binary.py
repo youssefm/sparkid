@@ -130,6 +130,11 @@ def from_bytes(data: bytes) -> str:
             f" got {len(data)}"
         )
 
+    if (data[15] & _PADDING_MASK) != 0:
+        raise ValueError(
+            "non-zero padding bits in binary SparkId"
+        )
+
     a0 = (data[0] >> 2) & _INDEX_MASK
     a1 = ((data[0] & 0x3) << 4) | (data[1] >> 4)
     a2 = ((data[1] & 0xF) << 2) | (data[2] >> 6)
@@ -174,11 +179,6 @@ def from_bytes(data: bytes) -> str:
     e18 = e[a18]
     e19 = e[a19]
     e20 = e[a20]
-
-    if (data[15] & _PADDING_MASK) != 0:
-        raise ValueError(
-            "non-zero padding bits in binary SparkId"
-        )
 
     # Invalid indices map to "" in _ENCODE, making the result shorter than 21.
     result = "".join((
