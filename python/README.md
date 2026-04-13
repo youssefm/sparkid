@@ -34,6 +34,20 @@ print(dt.isoformat())
 # => "2025-11-14T22:13:20+00:00"
 ```
 
+### Binary representation
+
+Pack IDs into 16 bytes for compact storage. Sort order is preserved — byte-wise comparison on the binary form gives the same ordering as string comparison.
+
+```python
+from sparkid import to_bytes, from_bytes
+
+id = generate_id()
+
+data = to_bytes(id)         # bytes, length 16
+restored = from_bytes(data)
+assert id == restored
+```
+
 ## Properties
 
 | Property | Value |

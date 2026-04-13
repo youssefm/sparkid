@@ -34,6 +34,20 @@ console.log(date.toISOString());
 // => "2025-11-14T22:13:20.000Z"
 ```
 
+### Binary representation
+
+Pack IDs into 16 bytes for compact storage. Sort order is preserved — `memcmp` on the binary bytes gives the same ordering as string comparison.
+
+```typescript
+import { toBytes, fromBytes } from "sparkid/binary";
+
+const id = generateId();
+
+const bytes = toBytes(id);    // Uint8Array(16)
+const restored = fromBytes(bytes);
+console.log(id === restored); // true
+```
+
 ## Properties
 
 | Property | Value |

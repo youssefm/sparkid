@@ -115,6 +115,26 @@ let ms = id.timestamp_ms();
 let ts = id.timestamp();
 ```
 
+### Serde
+
+Enable the `serde` feature for `Serialize` and `Deserialize` on both `SparkId` and `SparkIdStr`:
+
+```bash
+cargo add sparkid --features serde
+```
+
+Human-readable formats (JSON, TOML, etc.) serialize as the 21-char Base58 string. Binary formats (postcard, bincode, etc.) serialize as the 16-byte packed representation.
+
+```rust
+use sparkid::SparkId;
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Record {
+    id: SparkId,
+    name: String,
+}
+```
+
 ## Ordering guarantees
 
 IDs from a single `IdGenerator` instance (or a single thread using `SparkId::new()`) are **strictly monotonically increasing** — every ID is lexicographically greater than the one before it.

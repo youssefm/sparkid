@@ -42,6 +42,10 @@ Each ID is 21 characters built from three parts:
 
 The Base58 alphabet (`123456789ABC...xyz`) excludes visually ambiguous characters (`0`, `O`, `I`, `l`), making IDs safe to copy, paste, and read aloud.
 
+### Binary format
+
+IDs can be packed into a 16-byte binary representation (6 bits per Base58 character, 126 data bits + 2 padding bits). Sort order is preserved — byte-wise comparison on the binary form gives the same ordering as string comparison. All three language implementations provide `toBytes`/`fromBytes` (or `to_bytes`/`from_bytes`) for this conversion.
+
 ## JavaScript
 
 ```bash
