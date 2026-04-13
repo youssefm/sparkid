@@ -456,8 +456,7 @@ impl FromStr for SparkIdStr {
                 });
             }
         }
-        let out: [u8; ID_LENGTH] = bytes.try_into().unwrap();
-        Ok(SparkIdStr(out))
+        Ok(SparkIdStr(bytes.try_into().unwrap()))
     }
 }
 
