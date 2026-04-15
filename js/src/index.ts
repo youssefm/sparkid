@@ -133,21 +133,25 @@ function incrementEncodedTimestamp(delta: number): void {
       timestampCachePrefix.substring(0, 7) + TIMESTAMP_LOOKUP[newIndex];
     return;
   }
-  // Carry: set last digit to remainder, propagate carry=1 backward.
-  let prefix =
-    timestampCachePrefix.substring(0, 7) + TIMESTAMP_LOOKUP[newIndex - BASE];
+  // Carry: scan backward to find which digit absorbs carry.
+  let carryPosition = -1;
   for (let i = 6; i >= 0; i--) {
-    const next = SUCCESSOR[prefix.charCodeAt(i)];
-    if (next) {
-      timestampCachePrefix =
-        prefix.substring(0, i) + next + prefix.substring(i + 1);
-      return;
+    if (SUCCESSOR[timestampCachePrefix.charCodeAt(i)]) {
+      carryPosition = i;
+      break;
     }
-    prefix = prefix.substring(0, i) + FIRST_CHAR + prefix.substring(i + 1);
   }
-  throw new RangeError(
-    `Timestamp out of range: ${timestampCacheMs} (valid range: 0 to ${MAX_TIMESTAMP})`,
-  );
+  if (carryPosition < 0) {
+    throw new RangeError(
+      `Timestamp out of range: ${timestampCacheMs} (valid range: 0 to ${MAX_TIMESTAMP})`,
+    );
+  }
+  // Build result once: unchanged prefix + successor + wrapped zeros + remainder.
+  timestampCachePrefix =
+    timestampCachePrefix.substring(0, carryPosition) +
+    SUCCESSOR[timestampCachePrefix.charCodeAt(carryPosition)] +
+    FIRST_CHAR.repeat(6 - carryPosition) +
+    TIMESTAMP_LOOKUP[newIndex - BASE];
 }
 
 function refillRandom(): void {

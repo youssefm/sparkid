@@ -254,20 +254,25 @@ class IdGenerator:
                 + prefix[TIMESTAMP_CHAR_COUNT:]
             )
             return
-        # Carry: set last digit to remainder, propagate carry=1 backward.
-        ts = prefix[:7] + _TIMESTAMP_LOOKUP[new_index - BASE]
+        # Carry: scan backward to find which digit absorbs carry.
         successor = _SUCCESSOR_STR
+        carry_position = -1
         for i in range(6, -1, -1):
-            nxt = successor[ord(ts[i])]
-            if nxt:
-                self._prefix_plus_counter_head = (
-                    ts[:i] + nxt + ts[i + 1 :] + prefix[TIMESTAMP_CHAR_COUNT:]
-                )
-                return
-            ts = ts[:i] + _FIRST_CHAR + ts[i + 1 :]
-        raise ValueError(
-            f"Timestamp out of range: {self._timestamp_cache_ms}"
-            f" (valid range: 0 to {MAX_TIMESTAMP})"
+            if successor[ord(prefix[i])]:
+                carry_position = i
+                break
+        if carry_position < 0:
+            raise ValueError(
+                f"Timestamp out of range: {self._timestamp_cache_ms}"
+                f" (valid range: 0 to {MAX_TIMESTAMP})"
+            )
+        # Build result once: unchanged + successor + wrapped zeros + remainder + counter head.
+        self._prefix_plus_counter_head = (
+            prefix[:carry_position]
+            + successor[ord(prefix[carry_position])]
+            + _FIRST_CHAR * (6 - carry_position)
+            + _TIMESTAMP_LOOKUP[new_index - BASE]
+            + prefix[TIMESTAMP_CHAR_COUNT:]
         )
 
     def _refill_random(self) -> None:

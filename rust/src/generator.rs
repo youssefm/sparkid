@@ -780,16 +780,16 @@ impl IdGenerator {
         const FIELD_7_SHIFT: u32 = 80;
         const FIELD_MASK: u128 = 0x3F;
 
-        let field = ((self.cached_timestamp_packed >> FIELD_7_SHIFT) & FIELD_MASK) as u64 + delta;
-        if field < BASE {
-            // Common case: no carry. Clear field 7 and set new value.
-            self.cached_timestamp_packed = (self.cached_timestamp_packed & !(FIELD_MASK << FIELD_7_SHIFT))
-                | ((field as u128) << FIELD_7_SHIFT);
+        let current = ((self.cached_timestamp_packed >> FIELD_7_SHIFT) & FIELD_MASK) as u64;
+        let headroom = MAX_INDEX as u64 - current;
+        if delta <= headroom {
+            // Common case: no carry. Add delta in place.
+            self.cached_timestamp_packed += (delta as u128) << FIELD_7_SHIFT;
             return;
         }
 
-        // Carry path: remainder fits in one digit, carry=1 propagates upward.
-        let remainder = field - BASE;
+        // Carry path: set field 7 to remainder, propagate carry=1 upward.
+        let remainder = delta - headroom - 1;
         debug_assert!(remainder < BASE, "delta must be <= 58");
         self.cached_timestamp_packed = (self.cached_timestamp_packed & !(FIELD_MASK << FIELD_7_SHIFT))
             | ((remainder as u128) << FIELD_7_SHIFT);
@@ -797,13 +797,13 @@ impl IdGenerator {
         // Propagate carry=1 through fields 6..0 (shifts 86, 92, ..., 122).
         let mut shift = FIELD_7_SHIFT + 6;
         loop {
-            let digit = ((self.cached_timestamp_packed >> shift) & FIELD_MASK) as u64 + 1;
-            if digit < BASE {
-                self.cached_timestamp_packed = (self.cached_timestamp_packed & !(FIELD_MASK << shift))
-                    | ((digit as u128) << shift);
+            let field = ((self.cached_timestamp_packed >> shift) & FIELD_MASK) as u64;
+            if field < MAX_INDEX as u64 {
+                // Room to absorb carry: increment in place.
+                self.cached_timestamp_packed += 1u128 << shift;
                 return;
             }
-            // digit == 58: set to 0 and continue carry
+            // field == 57: wraps to 0, carry continues.
             self.cached_timestamp_packed &= !(FIELD_MASK << shift);
             if shift >= 122 {
                 break;
