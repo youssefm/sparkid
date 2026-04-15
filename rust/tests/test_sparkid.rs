@@ -153,29 +153,31 @@ fn test_prefix_is_lexicographically_sortable() {
 fn test_encode_boundary_values() {
     let mut gen = IdGenerator::new();
 
-    gen.encode_timestamp_test(0);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    let id = gen.next_id_at(0);
+    assert_eq!(id.timestamp_ms(), 0);
 
-    gen.encode_timestamp_test(1);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 1]);
+    let id = gen.next_id_at(1);
+    assert_eq!(id.timestamp_ms(), 1);
 
-    gen.encode_timestamp_test(57);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 57]);
+    let id = gen.next_id_at(57);
+    assert_eq!(id.timestamp_ms(), 57);
 
-    gen.encode_timestamp_test(58);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 1, 0]);
+    let id = gen.next_id_at(58);
+    assert_eq!(id.timestamp_ms(), 58);
 }
 
 #[test]
 fn test_encode_monotonic_over_range() {
     let mut gen = IdGenerator::new();
     let ts = current_time_ms();
-    let mut prev: Vec<u8> = Vec::new();
+    let mut prev_ms = 0u64;
     for offset in 0..10_000u64 {
-        gen.encode_timestamp_test(ts + offset);
-        let encoded: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
-        assert!(encoded > prev, "Not monotonic at offset {offset}");
-        prev = encoded;
+        let t = ts + offset;
+        let id = gen.next_id_at(t);
+        let decoded = id.timestamp_ms();
+        assert_eq!(decoded, t, "Round-trip failed at offset {offset}");
+        assert!(decoded >= prev_ms, "Not monotonic at offset {offset}");
+        prev_ms = decoded;
     }
 }
 
@@ -183,13 +185,8 @@ fn test_encode_monotonic_over_range() {
 fn test_encode_round_trip() {
     let mut gen = IdGenerator::new();
     let ts = current_time_ms();
-    gen.encode_timestamp_test(ts);
-    let prefix_indices = &gen.timestamp_and_counter_head()[..8];
-    let mut val: u64 = 0;
-    for &idx in prefix_indices {
-        val = val * 58 + idx as u64;
-    }
-    assert_eq!(val, ts);
+    let id = gen.next_id_at(ts);
+    assert_eq!(id.timestamp_ms(), ts);
 }
 
 #[test]
@@ -198,13 +195,13 @@ fn test_encode_digit_boundaries() {
     for power in 1..8 {
         let boundary = 58u64.pow(power);
 
-        gen.encode_timestamp_test(boundary - 1);
-        let before: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
-        gen.encode_timestamp_test(boundary);
-        let at: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
-        gen.encode_timestamp_test(boundary + 1);
-        let after: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
+        let before = gen.next_id_at(boundary - 1);
+        let at = gen.next_id_at(boundary);
+        let after = gen.next_id_at(boundary + 1);
 
+        assert_eq!(before.timestamp_ms(), boundary - 1);
+        assert_eq!(at.timestamp_ms(), boundary);
+        assert_eq!(after.timestamp_ms(), boundary + 1);
         assert!(before < at, "boundary {boundary}: before >= at");
         assert!(at < after, "boundary {boundary}: at >= after");
     }
@@ -215,7 +212,7 @@ fn test_encode_preserves_counter_head() {
     let mut gen = IdGenerator::new();
     gen.set_counter_head(&[33, 34, 35, 36, 37]); // a b c d e
     gen.encode_timestamp_test(12345);
-    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[33, 34, 35, 36, 37]);
+    assert_eq!(gen.counter_head_indices(), &[33, 34, 35, 36, 37]);
 }
 
 // ---------------------------------------------------------------------------
@@ -225,15 +222,15 @@ fn test_encode_preserves_counter_head() {
 #[test]
 fn test_encode_timestamp_zero() {
     let mut gen = IdGenerator::new();
-    gen.encode_timestamp_test(0);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    let id = gen.next_id_at(0);
+    assert_eq!(id.timestamp_ms(), 0);
 }
 
 #[test]
 fn test_encode_timestamp_max() {
     let mut gen = IdGenerator::new();
-    gen.encode_timestamp_test(MAX_TIMESTAMP);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[57, 57, 57, 57, 57, 57, 57, 57]);
+    let id = gen.next_id_at(MAX_TIMESTAMP);
+    assert_eq!(id.timestamp_ms(), MAX_TIMESTAMP);
 }
 
 #[test]
@@ -323,7 +320,7 @@ fn test_single_carry() {
     gen.increment_carry_test();
 
     assert_eq!(gen.counter_tail(), 0); // '1' = index 0
-    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 9, 9, 9, 10]); // AAAAB
+    assert_eq!(gen.counter_head_indices(), &[9, 9, 9, 9, 10]); // AAAAB
 }
 
 #[test]
@@ -335,7 +332,7 @@ fn test_cascading_carry() {
     gen.increment_carry_test();
 
     assert_eq!(gen.counter_tail(), 0); // '1' = index 0
-    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 10, 0, 0, 0]); // AB111
+    assert_eq!(gen.counter_head_indices(), &[9, 10, 0, 0, 0]); // AB111
 }
 
 #[test]

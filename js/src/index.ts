@@ -119,6 +119,37 @@ function encodeTimestamp(timestamp: number): void {
     char7;
 }
 
+/**
+ * Increment the cached timestamp prefix string by `delta` (1..58).
+ *
+ * Decodes the last character to a Base58 index, adds delta, and replaces
+ * the character. If the result carries (>= 58), falls back to full
+ * re-encode since carry is rare (~1/58 for delta=1).
+ */
+function incrementEncodedTimestamp(delta: number): void {
+  const newIndex = BASE58_INDEX[timestampCachePrefix.charCodeAt(7)] + delta;
+  if (newIndex < BASE) {
+    timestampCachePrefix =
+      timestampCachePrefix.substring(0, 7) + TIMESTAMP_LOOKUP[newIndex];
+    return;
+  }
+  // Carry: set last digit to remainder, propagate carry=1 backward.
+  let prefix =
+    timestampCachePrefix.substring(0, 7) + TIMESTAMP_LOOKUP[newIndex - BASE];
+  for (let i = 6; i >= 0; i--) {
+    const next = SUCCESSOR[prefix.charCodeAt(i)];
+    if (next) {
+      timestampCachePrefix =
+        prefix.substring(0, i) + next + prefix.substring(i + 1);
+      return;
+    }
+    prefix = prefix.substring(0, i) + FIRST_CHAR + prefix.substring(i + 1);
+  }
+  throw new RangeError(
+    `Timestamp out of range: ${timestampCacheMs} (valid range: 0 to ${MAX_TIMESTAMP})`,
+  );
+}
+
 function refillRandom(): void {
   if (randomRaw === undefined) {
     randomRaw = new Uint8Array(RANDOM_BATCH_SIZE);
@@ -214,8 +245,17 @@ export function generateId(): string {
   const timestamp = Date.now();
 
   if (timestamp > timestampCacheMs) {
-    // New millisecond (or first call): encode timestamp, seed counter.
-    encodeTimestamp(timestamp);
+    // New millisecond (or first call): update timestamp, seed counter.
+    const delta = timestamp - timestampCacheMs;
+    if (delta <= BASE) {
+      // Fast path: increment the encoded timestamp directly,
+      // avoiding 8 Math.trunc/modulo operations.
+      timestampCacheMs = timestamp;
+      incrementEncodedTimestamp(delta);
+    } else {
+      // Large jump or first call: full re-encode.
+      encodeTimestamp(timestamp);
+    }
     seedCounter();
   } else {
     // Same millisecond (or clock went backward): increment counter tail.

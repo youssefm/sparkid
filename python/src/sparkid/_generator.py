@@ -133,8 +133,16 @@ class IdGenerator:
         timestamp = _time_ns() // 1_000_000
 
         if timestamp > self._timestamp_cache_ms:
-            # New millisecond (or first call): encode timestamp, seed counter.
-            self._encode_timestamp(timestamp)
+            # New millisecond (or first call): update timestamp, seed counter.
+            delta = timestamp - self._timestamp_cache_ms
+            if delta <= BASE:
+                # Fast path: increment the encoded timestamp directly,
+                # avoiding 8 divmod operations.
+                self._timestamp_cache_ms = timestamp
+                self._increment_encoded_timestamp(delta)
+            else:
+                # Large jump or first call: full re-encode.
+                self._encode_timestamp(timestamp)
             self._seed_counter()
         else:
             # Same millisecond (or clock went backward): increment counter tail.
@@ -228,6 +236,38 @@ class IdGenerator:
         # Update the prefix, preserving the counter head portion.
         self._prefix_plus_counter_head = (
             ts_prefix + self._prefix_plus_counter_head[TIMESTAMP_CHAR_COUNT:]
+        )
+
+    def _increment_encoded_timestamp(self, delta: int) -> None:
+        """Increment the cached timestamp prefix by delta (1..58).
+
+        Decodes the last timestamp character to a Base58 index, adds delta,
+        and replaces it. If the result carries (>= 58), propagates carry
+        backward through the prefix using the successor table.
+        """
+        prefix = self._prefix_plus_counter_head
+        new_index = _BASE58_INDEX[prefix[7]] + delta
+        if new_index < BASE:
+            self._prefix_plus_counter_head = (
+                prefix[:7]
+                + _TIMESTAMP_LOOKUP[new_index]
+                + prefix[TIMESTAMP_CHAR_COUNT:]
+            )
+            return
+        # Carry: set last digit to remainder, propagate carry=1 backward.
+        ts = prefix[:7] + _TIMESTAMP_LOOKUP[new_index - BASE]
+        successor = _SUCCESSOR_STR
+        for i in range(6, -1, -1):
+            nxt = successor[ord(ts[i])]
+            if nxt:
+                self._prefix_plus_counter_head = (
+                    ts[:i] + nxt + ts[i + 1 :] + prefix[TIMESTAMP_CHAR_COUNT:]
+                )
+                return
+            ts = ts[:i] + _FIRST_CHAR + ts[i + 1 :]
+        raise ValueError(
+            f"Timestamp out of range: {self._timestamp_cache_ms}"
+            f" (valid range: 0 to {MAX_TIMESTAMP})"
         )
 
     def _refill_random(self) -> None:
