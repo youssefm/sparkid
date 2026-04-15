@@ -833,7 +833,7 @@ impl IdGenerator {
         self.random_position = 0;
     }
 
-    #[cold]
+    #[inline]
     fn seed_counter(&mut self) {
         if self.random_position + COUNTER_CHAR_COUNT > self.random_count {
             self.refill_random();
