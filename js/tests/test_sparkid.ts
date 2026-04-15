@@ -125,7 +125,9 @@ describe("Timestamp encoding", () => {
   });
 });
 
-
+// ---------------------------------------------------------------------------
+// Counter monotonicity
+// ---------------------------------------------------------------------------
 
 describe("Counter monotonicity", () => {
   it("burst of 50,000 IDs is strictly increasing", () => {
