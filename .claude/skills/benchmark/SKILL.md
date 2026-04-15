@@ -39,10 +39,12 @@ All commands run from the `rust/` directory. Uses Criterion for statistical benc
 
 | Command | What it measures |
 |---|---|
-| `cargo bench` | All Rust benchmarks (generator, thread-local, parse, comparison) |
+| `cargo bench` | All Rust benchmarks (generator, thread-local, parse, from_u128, from_bytes, comparison) |
 | `cargo bench -- "IdGenerator::next_id"` | `IdGenerator::next_id` only (direct generator) |
 | `cargo bench -- "SparkId::new"` | `SparkId::new` only (thread-local path) |
 | `cargo bench -- "from_str"` | `SparkId::from_str` parsing only |
+| `cargo bench -- "from_u128"` | `SparkId::from_u128` binary validation only |
+| `cargo bench -- "from_bytes"` | `SparkId::from_bytes` binary validation only |
 | `cargo bench -- "id_generators"` | Comparison group only (sparkid vs uuid v4/v7, nanoid, ulid) |
 
 ### Cross-language comparison (`repo root`)
@@ -55,6 +57,6 @@ All commands run from the `rust/` directory. Uses Criterion for statistical benc
 
 - **"How fast is sparkid?"** → Run the core benchmark for the relevant language (`npm run bench`, `uv run python bench/benchmark.py`, or `cargo bench -- "IdGenerator::next_id"`)
 - **"How does it compare to X?"** → Run the comparison benchmark for the relevant language
-- **"Is binary encoding fast?"** → JS: `npm run bench:binary`, Python: `--binary` flag, Rust: not separately benchmarked (part of parse bench)
+- **"Is binary encoding fast?"** → JS: `npm run bench:binary`, Python: `--binary` flag, Rust: `cargo bench -- "from_u128\|from_bytes"`
 - **"Benchmark everything"** → Run each language's full benchmark sequentially, one after another
 - **"I changed the generator"** → Run only the core benchmark for the language that was changed
