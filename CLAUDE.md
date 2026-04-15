@@ -78,3 +78,8 @@ Base58 alphabet: `123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz`
 
 - **No magic constants**: Extract numeric/string literals into named constants. Exceptions: 0, 1, empty string.
 - **No abbreviations**: Use full words in identifiers (e.g., `timestamp` not `ts`, `position` not `pos`, `counter` not `ctr`). Common units are fine: `ms`, `KB`, `ns`.
+- **`#[inline]` on Rust public accessors**: All trivial or delegating public methods on `SparkId`/`SparkIdStr` must have `#[inline]` to ensure cross-crate callers get inlining. Without it, even a one-liner pays full function call overhead from external crates.
+
+## Git workflow
+
+- **Never commit or push without explicit user approval.** Wait for the user to ask before committing, pushing, or creating PRs.
