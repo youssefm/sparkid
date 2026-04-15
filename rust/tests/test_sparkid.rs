@@ -216,8 +216,109 @@ fn test_encode_preserves_counter_head() {
 }
 
 // ---------------------------------------------------------------------------
-// Timestamp validation
+// Incremental timestamp encoding (delta ≤ 58 fast path)
 // ---------------------------------------------------------------------------
+
+#[test]
+fn test_increment_various_deltas() {
+    // Deltas 1 through 58 should all produce correct timestamps via the fast path.
+    let base: u64 = 1_700_000_000_000;
+    let mut gen = IdGenerator::new();
+    let _ = gen.next_id_at(base); // prime
+
+    for delta in 1..=58u64 {
+        let ts = base + delta;
+        let id = gen.next_id_at(ts);
+        assert_eq!(id.timestamp_ms(), ts, "failed for delta {delta}");
+    }
+}
+
+#[test]
+fn test_increment_delta_at_headroom_boundary() {
+    // Start at a timestamp where field 7 = 50 (headroom = 7).
+    // delta=7 should fit without carry, delta=8 should carry.
+    let mut gen = IdGenerator::new();
+    let base = 50u64; // field 7 = 50, headroom = 57 - 50 = 7
+    let _ = gen.next_id_at(base);
+
+    // delta=7: no carry, field 7 becomes 57
+    let id = gen.next_id_at(base + 7);
+    assert_eq!(id.timestamp_ms(), 57);
+
+    // delta=1 more: carry, field 7 wraps to 0, field 6 increments
+    let id = gen.next_id_at(base + 8);
+    assert_eq!(id.timestamp_ms(), 58);
+}
+
+#[test]
+fn test_increment_large_delta_with_carry() {
+    // delta=30 from a position near the wrap point triggers carry ~52% of the time.
+    // Test a sweep of starting positions to cover both carry and no-carry.
+    let mut gen = IdGenerator::new();
+    for start_offset in 0..58u64 {
+        let base = 1_000_000u64 + start_offset;
+        let _ = gen.next_id_at(base);
+        let ts = base + 30;
+        let id = gen.next_id_at(ts);
+        assert_eq!(id.timestamp_ms(), ts, "failed at start_offset {start_offset}");
+    }
+}
+
+#[test]
+fn test_increment_multi_level_carry() {
+    // Position where fields 7 and 6 are both 57, so carry propagates two levels.
+    // 58*57 + 57 = 3363 → fields: [0,0,0,0,0,0,57,57]
+    let mut gen = IdGenerator::new();
+    let base = 58u64 * 57 + 57; // 3363
+    let _ = gen.next_id_at(base);
+
+    let id = gen.next_id_at(base + 1); // 3364 = 58*58 = 58^2
+    assert_eq!(id.timestamp_ms(), 3364);
+    // Verify field structure: [0,0,0,0,0,1,0,0]
+    assert_eq!(&id.as_str()[..8], "11111211");
+}
+
+#[test]
+fn test_increment_deep_carry_chain() {
+    // Position where fields 7, 6, 5, and 4 are all 57.
+    // 58^4 - 1 = 11_316_495 → fields: [0,0,0,0,57,57,57,57]
+    let mut gen = IdGenerator::new();
+    let base = 58u64.pow(4) - 1;
+    let _ = gen.next_id_at(base);
+
+    let id = gen.next_id_at(base + 1); // = 58^4
+    assert_eq!(id.timestamp_ms(), 58u64.pow(4));
+    assert_eq!(&id.as_str()[..8], "11121111");
+}
+
+#[test]
+fn test_increment_delta_58_with_carry() {
+    // Maximum delta (58) starting from field 7 = 0 should carry.
+    // 0 + 58 = 58 → remainder = 0, carry into field 6.
+    let mut gen = IdGenerator::new();
+    let base = 58u64 * 10; // field 7 = 0, field 6 = 10
+    let _ = gen.next_id_at(base);
+
+    let id = gen.next_id_at(base + 58);
+    assert_eq!(id.timestamp_ms(), base + 58);
+}
+
+#[test]
+fn test_increment_vs_full_encode_equivalence() {
+    // Generate IDs with varying deltas and verify they match what a fresh
+    // full-encode generator would produce (same timestamp_ms round-trip).
+    let base: u64 = 1_700_000_000_000;
+    let deltas = [1, 2, 5, 10, 20, 30, 45, 57, 58, 1, 3, 58, 58, 1];
+    let mut gen = IdGenerator::new();
+    let _ = gen.next_id_at(base);
+
+    let mut ts = base;
+    for &delta in &deltas {
+        ts += delta;
+        let id = gen.next_id_at(ts);
+        assert_eq!(id.timestamp_ms(), ts, "mismatch at ts={ts}, delta={delta}");
+    }
+}
 
 #[test]
 fn test_encode_timestamp_zero() {
