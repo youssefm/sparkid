@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use sparkid::{IdGenerator, SparkId};
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -152,5 +152,25 @@ fn bench_parse(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_generator, bench_thread_local, bench_parse, bench_comparison);
+fn bench_from_u128(c: &mut Criterion) {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let packed = id.as_u128();
+
+    c.bench_function("sparkid::SparkId::from_u128", |b| {
+        b.iter(|| SparkId::from_u128(black_box(packed)).unwrap())
+    });
+}
+
+fn bench_from_bytes(c: &mut Criterion) {
+    let mut gen = IdGenerator::new();
+    let id = gen.next_id();
+    let bytes = id.to_bytes();
+
+    c.bench_function("sparkid::SparkId::from_bytes", |b| {
+        b.iter(|| SparkId::from_bytes(black_box(bytes)).unwrap())
+    });
+}
+
+criterion_group!(benches, bench_generator, bench_thread_local, bench_parse, bench_from_u128, bench_from_bytes, bench_comparison);
 criterion_main!(benches);

@@ -35,6 +35,17 @@ const INVALID_INDEX: u8 = 0xFF;
 // Number of 6-bit fields packed into the u128 binary representation
 const PACKED_BYTE_COUNT: usize = 16;
 
+// Bit-plane mask: selects the MSB (bit 5) of every 6-bit field.
+// Fields are at bits [127:122], [121:116], ..., [7:2].
+// Bit 5 positions: 127, 121, 115, ..., 7.
+//
+//   100000 100000 100000 100000 100000 100000 100000 100000
+//   100000 100000 100000 100000 100000 100000 100000 100000
+//   100000 100000 100000 100000 100000 00
+//   ^^^^^^                              ^^
+//   field 0                             padding (not set)
+const FIELD_MSB_MASK: u128 = 0x82082082082082082082082082082080;
+
 // Maximum encodable timestamp: 58^8 - 1 (8 Base58 chars)
 const MAX_TIMESTAMP: u64 = BASE.pow(TIMESTAMP_CHAR_COUNT as u32) - 1; // 128_063_081_718_015
 
@@ -192,6 +203,7 @@ impl SparkId {
     }
 
     /// Returns the inner `u128` binary representation.
+    #[inline]
     pub fn as_u128(&self) -> u128 {
         self.0
     }
@@ -200,11 +212,40 @@ impl SparkId {
     ///
     /// Validates that every 6-bit field is in the range `[0, 57]` and that
     /// the 2 padding bits are zero. This is the inverse of [`as_u128`](Self::as_u128).
+    #[inline]
     pub fn from_u128(value: u128) -> Result<Self, ParseSparkIdError> {
-        Self::from_bytes(value.to_be_bytes())
+        // Validate padding: the bottom 2 bits must be zero.
+        if value & 0x03 != 0 {
+            return Err(ParseSparkIdError {
+                kind: ParseErrorKind::InvalidPadding,
+            });
+        }
+
+        // Branchless SWAR validation: check all 21 six-bit fields at once.
+        // A field value v is invalid iff v >= 58, which in binary means
+        // b5 & b4 & b3 & (b2 | b1). We compute this predicate for every
+        // field in parallel using shifts and AND with the MSB-plane mask.
+        let invalid =
+            value & (value << 1) & (value << 2) & ((value << 3) | (value << 4)) & FIELD_MSB_MASK;
+        if invalid != 0 {
+            // Slow path: find the first invalid field for the error message.
+            let first_invalid_bit = 128 - invalid.leading_zeros(); // 1-based from bottom
+            let field_index = (128 - first_invalid_bit as usize) / 6;
+            let shift = 122 - (field_index * 6);
+            let field_value = ((value >> shift) & 0x3F) as u8;
+            return Err(ParseSparkIdError {
+                kind: ParseErrorKind::InvalidBinaryIndex {
+                    value: field_value,
+                    byte_position: (field_index * 6) / 8,
+                },
+            });
+        }
+
+        Ok(SparkId(value))
     }
 
     /// Returns the 16-byte big-endian binary representation.
+    #[inline]
     pub fn to_bytes(&self) -> [u8; PACKED_BYTE_COUNT] {
         self.0.to_be_bytes()
     }
@@ -213,38 +254,14 @@ impl SparkId {
     ///
     /// Validates that every 6-bit field is in the range `[0, 57]` and that
     /// the 2 padding bits in the last byte are zero.
+    #[inline]
     pub fn from_bytes(bytes: [u8; PACKED_BYTE_COUNT]) -> Result<Self, ParseSparkIdError> {
-        let value = u128::from_be_bytes(bytes);
-
-        // Validate padding: the bottom 2 bits must be zero.
-        if value & 0x03 != 0 {
-            return Err(ParseSparkIdError {
-                kind: ParseErrorKind::InvalidPadding,
-            });
-        }
-
-        // Validate all 21 six-bit fields are in [0, 57].
-        let mut shift = 122i32;
-        let mut char_index = 0usize;
-        while char_index < ID_LENGTH {
-            let index = ((value >> shift as u32) & 0x3F) as u8;
-            if index > MAX_INDEX {
-                return Err(ParseSparkIdError {
-                    kind: ParseErrorKind::InvalidBinaryIndex {
-                        value: index,
-                        byte_position: (char_index * 6) / 8,
-                    },
-                });
-            }
-            shift -= 6;
-            char_index += 1;
-        }
-
-        Ok(SparkId(value))
+        Self::from_u128(u128::from_be_bytes(bytes))
     }
 
     /// Returns a stack-allocated [`SparkIdStr`] containing the 21-char
     /// Base58 string representation.
+    #[inline]
     pub fn as_str(&self) -> SparkIdStr {
         SparkIdStr::from_packed(self.0)
     }
@@ -253,6 +270,7 @@ impl SparkId {
     ///
     /// Unpacks the first 8 Base58 indices from the binary representation
     /// and reconstructs the original timestamp via Horner's method.
+    #[inline]
     pub fn timestamp_ms(&self) -> u64 {
         // Extract the first 8 six-bit indices directly from the u128.
         // Index 0 is at bits 127..122, index 1 at 121..116, etc.
@@ -287,6 +305,7 @@ impl SparkId {
     /// let ts = id.timestamp();
     /// ```
     #[cfg(feature = "std")]
+    #[inline]
     pub fn timestamp(&self) -> SystemTime {
         UNIX_EPOCH + std::time::Duration::from_millis(self.timestamp_ms())
     }

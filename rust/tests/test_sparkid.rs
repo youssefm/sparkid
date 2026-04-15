@@ -1175,6 +1175,76 @@ fn test_from_u128_known_value() {
     assert_eq!(&*id.as_str(), "111111111111111111111");
 }
 
+#[test]
+fn test_from_u128_boundary_value_57_valid_all_fields() {
+    // 57 is the maximum valid index. Set every field to 57.
+    let mut value: u128 = 0;
+    for i in 0..21 {
+        value |= 57u128 << (122 - i * 6);
+    }
+    assert!(SparkId::from_u128(value).is_ok());
+}
+
+#[test]
+fn test_from_u128_boundary_value_58_invalid_each_field() {
+    // 58 is the minimum invalid index. Test it at every field position.
+    for field in 0..21 {
+        let shift = 122 - field * 6;
+        // Start with all-zeros (valid), set one field to 58
+        let value: u128 = 58u128 << shift;
+        let result = SparkId::from_u128(value);
+        assert!(
+            result.is_err(),
+            "field {field} with value 58 should be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_from_u128_all_invalid_values_58_through_63() {
+    for invalid_value in 58..=63u128 {
+        // Place the invalid value in the middle field (field 10)
+        let shift = 122 - 10 * 6;
+        let value = invalid_value << shift;
+        let result = SparkId::from_u128(value);
+        assert!(
+            result.is_err(),
+            "value {invalid_value} at field 10 should be rejected"
+        );
+    }
+}
+
+#[test]
+fn test_from_u128_multiple_invalid_fields() {
+    // Set fields 0, 10, and 20 to invalid values simultaneously
+    let mut value: u128 = 0;
+    value |= 63u128 << 122; // field 0
+    value |= 60u128 << (122 - 10 * 6); // field 10
+    value |= 58u128 << (122 - 20 * 6); // field 20
+    assert!(SparkId::from_u128(value).is_err());
+}
+
+#[test]
+fn test_from_u128_max_valid_id() {
+    // Every field set to 57 = the largest valid SparkId
+    let mut value: u128 = 0;
+    for i in 0..21 {
+        value |= 57u128 << (122 - i * 6);
+    }
+    let id = SparkId::from_u128(value).unwrap();
+    // 57 maps to 'z' (last char of Base58 alphabet)
+    assert_eq!(&*id.as_str(), "zzzzzzzzzzzzzzzzzzzzz");
+}
+
+#[test]
+fn test_from_bytes_boundary_value_58_invalid() {
+    // Same boundary test via from_bytes
+    let shift = 122 - 5 * 6; // field 5
+    let value: u128 = 58u128 << shift;
+    let bytes = value.to_be_bytes();
+    assert!(SparkId::from_bytes(bytes).is_err());
+}
+
 // ---------------------------------------------------------------------------
 // serde
 // ---------------------------------------------------------------------------
