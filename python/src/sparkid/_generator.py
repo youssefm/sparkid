@@ -104,6 +104,7 @@ class IdGenerator:
     __slots__ = (
         "__weakref__",
         "_timestamp_cache_ms",
+        "_timestamp_cache_prefix",
         "_prefix_plus_counter_head",
         "_counter_tail",
         "_counter_head_buf",
@@ -120,6 +121,7 @@ class IdGenerator:
     def _reset_state(self) -> None:
         """(Re)initialize all mutable state. Called on construction and after fork."""
         self._timestamp_cache_ms = 0
+        self._timestamp_cache_prefix = _FIRST_CHAR * TIMESTAMP_CHAR_COUNT
         self._prefix_plus_counter_head = _FIRST_CHAR * _PREFIX_COUNTER_HEAD_LENGTH
         self._counter_tail = _FIRST_CHAR
         # Bytearray for carry propagation (counter head)
@@ -133,8 +135,16 @@ class IdGenerator:
         timestamp = _time_ns() // 1_000_000
 
         if timestamp > self._timestamp_cache_ms:
-            # New millisecond (or first call): encode timestamp, seed counter.
-            self._encode_timestamp(timestamp)
+            # New millisecond (or first call): update timestamp, seed counter.
+            delta = timestamp - self._timestamp_cache_ms
+            if delta <= BASE:
+                # Fast path: increment the encoded timestamp directly,
+                # avoiding 8 divmod operations.
+                self._timestamp_cache_ms = timestamp
+                self._increment_encoded_timestamp(delta)
+            else:
+                # Large jump or first call: full re-encode.
+                self._encode_timestamp(timestamp)
             self._seed_counter()
         else:
             # Same millisecond (or clock went backward): increment counter tail.
@@ -170,9 +180,10 @@ class IdGenerator:
         self._random_byte_position = end
         counter_bytes = self._random_byte_buffer[position:end]
         self._counter_head_buf[:] = counter_bytes[:_COUNTER_HEAD_CHAR_COUNT]
-        self._prefix_plus_counter_head = self._prefix_plus_counter_head[
-            :TIMESTAMP_CHAR_COUNT
-        ] + counter_bytes[:_COUNTER_HEAD_CHAR_COUNT].decode("ascii")
+        self._prefix_plus_counter_head = (
+            self._timestamp_cache_prefix
+            + counter_bytes[:_COUNTER_HEAD_CHAR_COUNT].decode("ascii")
+        )
         self._counter_tail = chr(counter_bytes[_COUNTER_HEAD_CHAR_COUNT])
 
     def _increment_counter_carry(self) -> None:
@@ -190,9 +201,9 @@ class IdGenerator:
             if nxt >= 0:
                 buf[i] = nxt
                 self._counter_tail = _FIRST_CHAR
-                self._prefix_plus_counter_head = self._prefix_plus_counter_head[
-                    :TIMESTAMP_CHAR_COUNT
-                ] + buf.decode("ascii")
+                self._prefix_plus_counter_head = (
+                    self._timestamp_cache_prefix + buf.decode("ascii")
+                )
                 return
             buf[i] = _FIRST_BYTE
         # Overflow: bump timestamp, reseed.
@@ -215,7 +226,7 @@ class IdGenerator:
         timestamp, r3 = divmod(timestamp, BASE)
         timestamp, r2 = divmod(timestamp, BASE)
         timestamp, r1 = divmod(timestamp, BASE)
-        ts_prefix = (
+        self._timestamp_cache_prefix = (
             lookup[timestamp]
             + lookup[r1]
             + lookup[r2]
@@ -225,9 +236,39 @@ class IdGenerator:
             + lookup[r6]
             + lookup[r7]
         )
-        # Update the prefix, preserving the counter head portion.
-        self._prefix_plus_counter_head = (
-            ts_prefix + self._prefix_plus_counter_head[TIMESTAMP_CHAR_COUNT:]
+
+    def _increment_encoded_timestamp(self, delta: int) -> None:
+        """Increment the cached timestamp prefix by delta (1..58).
+
+        Decodes the last timestamp character to a Base58 index, adds delta,
+        and replaces it. If the result carries (>= 58), propagates carry
+        backward through the prefix using the successor table.
+        """
+        timestamp_prefix = self._timestamp_cache_prefix
+        new_index = _BASE58_INDEX[timestamp_prefix[7]] + delta
+        if new_index < BASE:
+            self._timestamp_cache_prefix = (
+                timestamp_prefix[:7] + _TIMESTAMP_LOOKUP[new_index]
+            )
+            return
+        # Carry: scan backward to find which digit absorbs carry.
+        successor = _SUCCESSOR_STR
+        carry_position = -1
+        for i in range(6, -1, -1):
+            if successor[ord(timestamp_prefix[i])]:
+                carry_position = i
+                break
+        if carry_position < 0:
+            raise ValueError(
+                f"Timestamp out of range: {self._timestamp_cache_ms}"
+                f" (valid range: 0 to {MAX_TIMESTAMP})"
+            )
+        # Build result once: unchanged + successor + wrapped zeros + remainder.
+        self._timestamp_cache_prefix = (
+            timestamp_prefix[:carry_position]
+            + successor[ord(timestamp_prefix[carry_position])]
+            + _FIRST_CHAR * (6 - carry_position)
+            + _TIMESTAMP_LOOKUP[new_index - BASE]
         )
 
     def _refill_random(self) -> None:

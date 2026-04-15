@@ -116,16 +116,16 @@ class TestTimestampEncoding:
         gen = IdGenerator()
 
         gen._encode_timestamp(0)
-        assert gen._prefix_plus_counter_head[:8] == "1" * 8
+        assert gen._timestamp_cache_prefix == "1" * 8
 
         gen._encode_timestamp(1)
-        assert gen._prefix_plus_counter_head[:8] == "1" * 7 + "2"
+        assert gen._timestamp_cache_prefix == "1" * 7 + "2"
 
         gen._encode_timestamp(57)
-        assert gen._prefix_plus_counter_head[:8] == "1" * 7 + "z"
+        assert gen._timestamp_cache_prefix == "1" * 7 + "z"
 
         gen._encode_timestamp(58)
-        assert gen._prefix_plus_counter_head[:8] == "1" * 6 + "21"
+        assert gen._timestamp_cache_prefix == "1" * 6 + "21"
 
     def test_encode_monotonic_over_range(self):
         gen = IdGenerator()
@@ -133,7 +133,7 @@ class TestTimestampEncoding:
         prev = ""
         for offset in range(10000):
             gen._encode_timestamp(ts + offset)
-            encoded = gen._prefix_plus_counter_head[:8]
+            encoded = gen._timestamp_cache_prefix
             assert encoded > prev, f"Not monotonic at offset {offset}"
             prev = encoded
 
@@ -141,7 +141,7 @@ class TestTimestampEncoding:
         gen = IdGenerator()
         ts = int(time.time() * 1000)
         gen._encode_timestamp(ts)
-        encoded = gen._prefix_plus_counter_head[:8]
+        encoded = gen._timestamp_cache_prefix
         assert _decode_timestamp(encoded) == ts
 
     def test_encode_digit_boundaries(self):
@@ -150,11 +150,11 @@ class TestTimestampEncoding:
         for power in range(1, 8):
             boundary = BASE**power
             gen._encode_timestamp(boundary - 1)
-            before = gen._prefix_plus_counter_head[:8]
+            before = gen._timestamp_cache_prefix
             gen._encode_timestamp(boundary)
-            at = gen._prefix_plus_counter_head[:8]
+            at = gen._timestamp_cache_prefix
             gen._encode_timestamp(boundary + 1)
-            after = gen._prefix_plus_counter_head[:8]
+            after = gen._timestamp_cache_prefix
             assert before < at < after
 
     def test_encode_preserves_counter_head(self):
@@ -173,12 +173,12 @@ class TestTimestampValidation:
     def test_encode_timestamp_zero(self):
         gen = IdGenerator()
         gen._encode_timestamp(0)
-        assert gen._prefix_plus_counter_head[:8] == "1" * 8
+        assert gen._timestamp_cache_prefix == "1" * 8
 
     def test_encode_timestamp_max(self):
         gen = IdGenerator()
         gen._encode_timestamp(MAX_TIMESTAMP)
-        assert gen._prefix_plus_counter_head[:8] == "z" * 8
+        assert gen._timestamp_cache_prefix == "z" * 8
 
     def test_encode_timestamp_negative_raises(self):
         import pytest
@@ -200,7 +200,7 @@ class TestTimestampValidation:
         gen = IdGenerator()
         gen._timestamp_cache_ms = MAX_TIMESTAMP
         gen._encode_timestamp(MAX_TIMESTAMP)
-        gen._prefix_plus_counter_head = gen._prefix_plus_counter_head[:8] + "zzzzz"
+        gen._prefix_plus_counter_head = gen._timestamp_cache_prefix + "zzzzz"
         gen._counter_head_buf = bytearray([ord("z")] * 5)
         gen._counter_tail = "z"
 
@@ -282,7 +282,7 @@ class TestCounterCarry:
         ts = int(time.time() * 1000)
         gen._timestamp_cache_ms = ts
         gen._encode_timestamp(ts)
-        gen._prefix_plus_counter_head = gen._prefix_plus_counter_head[:8] + "zzzzz"
+        gen._prefix_plus_counter_head = gen._timestamp_cache_prefix + "zzzzz"
         gen._counter_head_buf = bytearray([ord("z")] * 5)
         gen._counter_tail = "z"
 
@@ -299,7 +299,7 @@ class TestCounterCarry:
         gen._seed_counter()
 
         # Force counter to max
-        gen._prefix_plus_counter_head = gen._prefix_plus_counter_head[:8] + "zzzzz"
+        gen._prefix_plus_counter_head = gen._timestamp_cache_prefix + "zzzzz"
         gen._counter_head_buf = bytearray([ord("z")] * 5)
         gen._counter_tail = "z"
 
@@ -558,6 +558,7 @@ class TestForkSafety:
         gen._reset_state()
 
         assert gen._timestamp_cache_ms == 0
+        assert gen._timestamp_cache_prefix == _FIRST_CHAR * 8
         assert gen._prefix_plus_counter_head == _FIRST_CHAR * 13
         assert gen._counter_tail == _FIRST_CHAR
         assert gen._counter_head_buf == bytearray(b"1" * 5)

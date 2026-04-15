@@ -142,6 +142,88 @@ fn bench_comparison(c: &mut Criterion) {
     println!("  ulid:    {}", ulid::Ulid::new());
 }
 
+/// Simulate realistic webserver traffic patterns using `next_id_at()`.
+///
+/// Generates a repeating timestamp sequence where:
+/// - Some milliseconds have multiple IDs (bursts)
+/// - Some milliseconds are skipped (idle gaps)
+/// - Delta between consecutive timestamps varies: 0 (same ms), 1, 2-5, 10+
+///
+/// The pattern repeats every ~100 IDs covering ~30ms of simulated time,
+/// producing a mix of same-ms increments (counter path) and ms-change
+/// increments (timestamp encode path).
+fn build_webserver_timestamps(base: u64, count: usize) -> Vec<u64> {
+    // Pattern: (delta_ms, ids_at_this_timestamp)
+    // Simulates ~30ms of traffic with bursts and gaps.
+    let pattern: &[(u64, usize)] = &[
+        (0, 3),  // 3 IDs at base+0 (burst)
+        (1, 2),  // 2 IDs at base+1
+        (1, 1),  // 1 ID  at base+2
+        (3, 2),  // skip 2ms, 2 IDs at base+5
+        (1, 1),  // 1 ID  at base+6
+        (1, 4),  // 4 IDs at base+7 (burst)
+        (2, 1),  // skip 1ms, 1 ID at base+9
+        (1, 1),  // 1 ID  at base+10
+        (5, 3),  // skip 4ms, 3 IDs at base+15
+        (1, 1),  // 1 ID  at base+16
+        (1, 2),  // 2 IDs at base+17
+        (10, 1), // skip 9ms, 1 ID at base+27 (big gap)
+        (1, 5),  // 5 IDs at base+28 (big burst)
+        (1, 1),  // 1 ID  at base+29
+    ];
+
+    let pattern_duration_ms: u64 = pattern.iter().map(|(d, _)| *d).sum();
+
+    let mut timestamps = Vec::with_capacity(count);
+    let mut current_ms = base;
+    'outer: loop {
+        for &(delta, ids) in pattern {
+            current_ms += delta;
+            for _ in 0..ids {
+                timestamps.push(current_ms);
+                if timestamps.len() >= count {
+                    break 'outer;
+                }
+            }
+        }
+        // Small gap between pattern repetitions
+        current_ms += pattern_duration_ms;
+    }
+    timestamps
+}
+
+fn bench_webserver(c: &mut Criterion) {
+    let mut group = c.benchmark_group("webserver_simulation");
+    let base_timestamp: u64 = 1_700_000_000_000;
+    let warmup_count = 10_000;
+    let bench_count = 100_000;
+
+    // Pre-build timestamp sequences (warmup + bench iterations share the pattern)
+    let timestamps = build_webserver_timestamps(base_timestamp, warmup_count + bench_count);
+
+    group.bench_function("realistic_traffic", |b| {
+        b.iter_custom(|iterations| {
+            let mut total = std::time::Duration::ZERO;
+            for _ in 0..iterations {
+                let mut gen = IdGenerator::new();
+                // Warmup: prime the generator
+                for &timestamp in &timestamps[..warmup_count] {
+                    let _ = gen.next_id_at(timestamp);
+                }
+
+                let start = std::time::Instant::now();
+                for &timestamp in &timestamps[warmup_count..] {
+                    black_box(gen.next_id_at(black_box(timestamp)));
+                }
+                total += start.elapsed();
+            }
+            total
+        });
+    });
+
+    group.finish();
+}
+
 fn bench_parse(c: &mut Criterion) {
     let mut gen = IdGenerator::new();
     let id = gen.next_id();
@@ -172,5 +254,5 @@ fn bench_from_bytes(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_generator, bench_thread_local, bench_parse, bench_from_u128, bench_from_bytes, bench_comparison);
+criterion_group!(benches, bench_generator, bench_thread_local, bench_webserver, bench_parse, bench_from_u128, bench_from_bytes, bench_comparison);
 criterion_main!(benches);

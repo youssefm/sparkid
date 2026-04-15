@@ -153,29 +153,31 @@ fn test_prefix_is_lexicographically_sortable() {
 fn test_encode_boundary_values() {
     let mut gen = IdGenerator::new();
 
-    gen.encode_timestamp_test(0);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    let id = gen.next_id_at(0);
+    assert_eq!(id.timestamp_ms(), 0);
 
-    gen.encode_timestamp_test(1);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 1]);
+    let id = gen.next_id_at(1);
+    assert_eq!(id.timestamp_ms(), 1);
 
-    gen.encode_timestamp_test(57);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 57]);
+    let id = gen.next_id_at(57);
+    assert_eq!(id.timestamp_ms(), 57);
 
-    gen.encode_timestamp_test(58);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 1, 0]);
+    let id = gen.next_id_at(58);
+    assert_eq!(id.timestamp_ms(), 58);
 }
 
 #[test]
 fn test_encode_monotonic_over_range() {
     let mut gen = IdGenerator::new();
     let ts = current_time_ms();
-    let mut prev: Vec<u8> = Vec::new();
+    let mut prev_ms = 0u64;
     for offset in 0..10_000u64 {
-        gen.encode_timestamp_test(ts + offset);
-        let encoded: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
-        assert!(encoded > prev, "Not monotonic at offset {offset}");
-        prev = encoded;
+        let t = ts + offset;
+        let id = gen.next_id_at(t);
+        let decoded = id.timestamp_ms();
+        assert_eq!(decoded, t, "Round-trip failed at offset {offset}");
+        assert!(decoded >= prev_ms, "Not monotonic at offset {offset}");
+        prev_ms = decoded;
     }
 }
 
@@ -183,13 +185,8 @@ fn test_encode_monotonic_over_range() {
 fn test_encode_round_trip() {
     let mut gen = IdGenerator::new();
     let ts = current_time_ms();
-    gen.encode_timestamp_test(ts);
-    let prefix_indices = &gen.timestamp_and_counter_head()[..8];
-    let mut val: u64 = 0;
-    for &idx in prefix_indices {
-        val = val * 58 + idx as u64;
-    }
-    assert_eq!(val, ts);
+    let id = gen.next_id_at(ts);
+    assert_eq!(id.timestamp_ms(), ts);
 }
 
 #[test]
@@ -198,13 +195,13 @@ fn test_encode_digit_boundaries() {
     for power in 1..8 {
         let boundary = 58u64.pow(power);
 
-        gen.encode_timestamp_test(boundary - 1);
-        let before: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
-        gen.encode_timestamp_test(boundary);
-        let at: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
-        gen.encode_timestamp_test(boundary + 1);
-        let after: Vec<u8> = gen.timestamp_and_counter_head()[..8].to_vec();
+        let before = gen.next_id_at(boundary - 1);
+        let at = gen.next_id_at(boundary);
+        let after = gen.next_id_at(boundary + 1);
 
+        assert_eq!(before.timestamp_ms(), boundary - 1);
+        assert_eq!(at.timestamp_ms(), boundary);
+        assert_eq!(after.timestamp_ms(), boundary + 1);
         assert!(before < at, "boundary {boundary}: before >= at");
         assert!(at < after, "boundary {boundary}: at >= after");
     }
@@ -215,25 +212,126 @@ fn test_encode_preserves_counter_head() {
     let mut gen = IdGenerator::new();
     gen.set_counter_head(&[33, 34, 35, 36, 37]); // a b c d e
     gen.encode_timestamp_test(12345);
-    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[33, 34, 35, 36, 37]);
+    assert_eq!(gen.counter_head_indices(), &[33, 34, 35, 36, 37]);
 }
 
 // ---------------------------------------------------------------------------
-// Timestamp validation
+// Incremental timestamp encoding (delta ≤ 58 fast path)
 // ---------------------------------------------------------------------------
+
+#[test]
+fn test_increment_various_deltas() {
+    // Deltas 1 through 58 should all produce correct timestamps via the fast path.
+    let base: u64 = 1_700_000_000_000;
+    let mut gen = IdGenerator::new();
+    let _ = gen.next_id_at(base); // prime
+
+    for delta in 1..=58u64 {
+        let ts = base + delta;
+        let id = gen.next_id_at(ts);
+        assert_eq!(id.timestamp_ms(), ts, "failed for delta {delta}");
+    }
+}
+
+#[test]
+fn test_increment_delta_at_headroom_boundary() {
+    // Start at a timestamp where field 7 = 50 (headroom = 7).
+    // delta=7 should fit without carry, delta=8 should carry.
+    let mut gen = IdGenerator::new();
+    let base = 50u64; // field 7 = 50, headroom = 57 - 50 = 7
+    let _ = gen.next_id_at(base);
+
+    // delta=7: no carry, field 7 becomes 57
+    let id = gen.next_id_at(base + 7);
+    assert_eq!(id.timestamp_ms(), 57);
+
+    // delta=1 more: carry, field 7 wraps to 0, field 6 increments
+    let id = gen.next_id_at(base + 8);
+    assert_eq!(id.timestamp_ms(), 58);
+}
+
+#[test]
+fn test_increment_large_delta_with_carry() {
+    // delta=30 from a position near the wrap point triggers carry ~52% of the time.
+    // Test a sweep of starting positions to cover both carry and no-carry.
+    let mut gen = IdGenerator::new();
+    for start_offset in 0..58u64 {
+        let base = 1_000_000u64 + start_offset;
+        let _ = gen.next_id_at(base);
+        let ts = base + 30;
+        let id = gen.next_id_at(ts);
+        assert_eq!(id.timestamp_ms(), ts, "failed at start_offset {start_offset}");
+    }
+}
+
+#[test]
+fn test_increment_multi_level_carry() {
+    // Position where fields 7 and 6 are both 57, so carry propagates two levels.
+    // 58*57 + 57 = 3363 → fields: [0,0,0,0,0,0,57,57]
+    let mut gen = IdGenerator::new();
+    let base = 58u64 * 57 + 57; // 3363
+    let _ = gen.next_id_at(base);
+
+    let id = gen.next_id_at(base + 1); // 3364 = 58*58 = 58^2
+    assert_eq!(id.timestamp_ms(), 3364);
+    // Verify field structure: [0,0,0,0,0,1,0,0]
+    assert_eq!(&id.as_str()[..8], "11111211");
+}
+
+#[test]
+fn test_increment_deep_carry_chain() {
+    // Position where fields 7, 6, 5, and 4 are all 57.
+    // 58^4 - 1 = 11_316_495 → fields: [0,0,0,0,57,57,57,57]
+    let mut gen = IdGenerator::new();
+    let base = 58u64.pow(4) - 1;
+    let _ = gen.next_id_at(base);
+
+    let id = gen.next_id_at(base + 1); // = 58^4
+    assert_eq!(id.timestamp_ms(), 58u64.pow(4));
+    assert_eq!(&id.as_str()[..8], "11121111");
+}
+
+#[test]
+fn test_increment_delta_58_with_carry() {
+    // Maximum delta (58) starting from field 7 = 0 should carry.
+    // 0 + 58 = 58 → remainder = 0, carry into field 6.
+    let mut gen = IdGenerator::new();
+    let base = 58u64 * 10; // field 7 = 0, field 6 = 10
+    let _ = gen.next_id_at(base);
+
+    let id = gen.next_id_at(base + 58);
+    assert_eq!(id.timestamp_ms(), base + 58);
+}
+
+#[test]
+fn test_increment_vs_full_encode_equivalence() {
+    // Generate IDs with varying deltas and verify they match what a fresh
+    // full-encode generator would produce (same timestamp_ms round-trip).
+    let base: u64 = 1_700_000_000_000;
+    let deltas = [1, 2, 5, 10, 20, 30, 45, 57, 58, 1, 3, 58, 58, 1];
+    let mut gen = IdGenerator::new();
+    let _ = gen.next_id_at(base);
+
+    let mut ts = base;
+    for &delta in &deltas {
+        ts += delta;
+        let id = gen.next_id_at(ts);
+        assert_eq!(id.timestamp_ms(), ts, "mismatch at ts={ts}, delta={delta}");
+    }
+}
 
 #[test]
 fn test_encode_timestamp_zero() {
     let mut gen = IdGenerator::new();
-    gen.encode_timestamp_test(0);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+    let id = gen.next_id_at(0);
+    assert_eq!(id.timestamp_ms(), 0);
 }
 
 #[test]
 fn test_encode_timestamp_max() {
     let mut gen = IdGenerator::new();
-    gen.encode_timestamp_test(MAX_TIMESTAMP);
-    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[57, 57, 57, 57, 57, 57, 57, 57]);
+    let id = gen.next_id_at(MAX_TIMESTAMP);
+    assert_eq!(id.timestamp_ms(), MAX_TIMESTAMP);
 }
 
 #[test]
@@ -323,7 +421,7 @@ fn test_single_carry() {
     gen.increment_carry_test();
 
     assert_eq!(gen.counter_tail(), 0); // '1' = index 0
-    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 9, 9, 9, 10]); // AAAAB
+    assert_eq!(gen.counter_head_indices(), &[9, 9, 9, 9, 10]); // AAAAB
 }
 
 #[test]
@@ -335,7 +433,7 @@ fn test_cascading_carry() {
     gen.increment_carry_test();
 
     assert_eq!(gen.counter_tail(), 0); // '1' = index 0
-    assert_eq!(&gen.timestamp_and_counter_head()[8..], &[9, 10, 0, 0, 0]); // AB111
+    assert_eq!(gen.counter_head_indices(), &[9, 10, 0, 0, 0]); // AB111
 }
 
 #[test]

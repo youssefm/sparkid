@@ -51,8 +51,6 @@ const MAX_TIMESTAMP: u64 = BASE.pow(TIMESTAMP_CHAR_COUNT as u32) - 1; // 128_063
 
 // Derived layout constants
 const COUNTER_HEAD_CHAR_COUNT: usize = COUNTER_CHAR_COUNT - 1;
-const COUNTER_TAIL_OFFSET: usize = TIMESTAMP_CHAR_COUNT + COUNTER_HEAD_CHAR_COUNT;
-const PREFIX_INDEX_COUNT: usize = COUNTER_TAIL_OFFSET; // timestamp (8) + counter head (5)
 
 // Reverse-lookup table: ASCII byte -> Base58 index (0-57), or 0xFF for invalid.
 const DECODE: [u8; 256] = {
@@ -65,19 +63,33 @@ const DECODE: [u8; 256] = {
     table
 };
 
-/// Pack the first 13 indices (timestamp + counter head) into the upper
-/// portion of a `u128`, occupying bits 127..50 with bits 49..0 zeroed.
+/// Pack 8 timestamp indices into bits 127..80 of a `u128`.
 ///
-/// Used to cache the slow-changing prefix so the hot path only packs the
-/// 8 fast-changing suffix indices (counter tail + random) using `u64`.
-fn pack_prefix(indices: &[u8; PREFIX_INDEX_COUNT]) -> u128 {
+/// Each index occupies a 6-bit field: index 0 at bits 127..122, index 1 at
+/// 121..116, ..., index 7 at bits 85..80. Bits 79..0 are zeroed.
+fn pack_timestamp(indices: &[u8; TIMESTAMP_CHAR_COUNT]) -> u128 {
     let mut value: u128 = 0;
-    for &index in indices {
-        value = (value << 6) | index as u128;
+    let mut i = 0;
+    while i < TIMESTAMP_CHAR_COUNT {
+        value = (value << 6) | indices[i] as u128;
+        i += 1;
     }
-    // Shift to position: 13 indices × 6 bits = 78 bits of data.
-    // The lowest index (index 12) needs to land at bits 55..50,
-    // so shift left by 50.
+    // 8 indices × 6 bits = 48 bits of data. Position so index 7 lands at bits 85..80.
+    value << 80
+}
+
+/// Pack 5 counter-head indices into bits 79..50 of a `u128`.
+///
+/// Each index occupies a 6-bit field: index 0 at bits 79..74, ...,
+/// index 4 at bits 55..50. Bits outside this range are zeroed.
+fn pack_counter_head(indices: &[u8; COUNTER_HEAD_CHAR_COUNT]) -> u128 {
+    let mut value: u128 = 0;
+    let mut i = 0;
+    while i < COUNTER_HEAD_CHAR_COUNT {
+        value = (value << 6) | indices[i] as u128;
+        i += 1;
+    }
+    // 5 indices × 6 bits = 30 bits. Position so index 4 lands at bits 55..50.
     value << 50
 }
 
@@ -593,14 +605,17 @@ mod serde_support {
 /// ```
 pub struct IdGenerator {
     timestamp_cache_ms: u64,
-    // Indices for timestamp (0..8) and counter head (8..13), used for carry
-    // propagation. The counter tail and random tail are stored separately.
-    index_buffer: [u8; PREFIX_INDEX_COUNT],
+    // Counter head indices (5 values, each 0-57). Used for carry propagation.
+    counter_head: [u8; COUNTER_HEAD_CHAR_COUNT],
     // Counter tail — kept as separate field for fast increment
     counter_tail: u8,
-    // Cached packed u128 of indices 0-12 (bits 127..50). Recomputed only when
-    // timestamp or counter head changes (~once per ms), avoiding 13 u128
-    // shift+OR operations on the hot path.
+    // Cached packed u128 of timestamp indices (bits 127..80). Updated on
+    // timestamp change — either incrementally (small deltas) or via full
+    // re-encode (large deltas or first call).
+    cached_timestamp_packed: u128,
+    // Cached packed u128 of indices 0-12 (bits 127..50). Equals
+    // cached_timestamp_packed | packed counter head. Recomputed when
+    // timestamp or counter head changes.
     cached_prefix: u128,
     // Pre-sampled random indices (valid Base58 indices after rejection sampling)
     random_buffer: Box<[u8]>,
@@ -620,8 +635,9 @@ impl IdGenerator {
     pub fn new() -> Self {
         IdGenerator {
             timestamp_cache_ms: 0,
-            index_buffer: [FIRST_INDEX; PREFIX_INDEX_COUNT],
+            counter_head: [FIRST_INDEX; COUNTER_HEAD_CHAR_COUNT],
             counter_tail: FIRST_INDEX,
+            cached_timestamp_packed: 0,
             cached_prefix: 0,
             random_buffer: vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice(),
             random_count: 0,
@@ -695,9 +711,16 @@ impl IdGenerator {
     #[inline(always)]
     fn prepare_next(&mut self, timestamp: u64) -> usize {
         if timestamp > self.timestamp_cache_ms {
-            // New millisecond (or first call): encode timestamp, seed counter.
+            let delta = timestamp - self.timestamp_cache_ms;
             self.timestamp_cache_ms = timestamp;
-            self.encode_timestamp(timestamp);
+            if delta <= BASE {
+                // Fast path: increment the packed timestamp directly,
+                // avoiding 8 divisions by 58.
+                self.increment_encoded_timestamp(delta);
+            } else {
+                // Large jump or first call: full re-encode.
+                self.encode_timestamp(timestamp);
+            }
             self.seed_counter();
         } else {
             // Same millisecond (or clock went backward): increment counter tail.
@@ -735,32 +758,63 @@ impl IdGenerator {
             timestamp <= MAX_TIMESTAMP,
             "Timestamp out of range: {timestamp} (valid range: 0 to {MAX_TIMESTAMP})"
         );
-        let mut remainder: u64;
+        let mut indices = [0u8; TIMESTAMP_CHAR_COUNT];
+        let mut i = TIMESTAMP_CHAR_COUNT;
+        while i > 0 {
+            i -= 1;
+            indices[i] = (timestamp % BASE) as u8;
+            timestamp /= BASE;
+        }
+        self.cached_timestamp_packed = pack_timestamp(&indices);
+    }
 
-        remainder = timestamp % BASE; timestamp /= BASE;
-        let c7 = remainder as u8;
-        remainder = timestamp % BASE; timestamp /= BASE;
-        let c6 = remainder as u8;
-        remainder = timestamp % BASE; timestamp /= BASE;
-        let c5 = remainder as u8;
-        remainder = timestamp % BASE; timestamp /= BASE;
-        let c4 = remainder as u8;
-        remainder = timestamp % BASE; timestamp /= BASE;
-        let c3 = remainder as u8;
-        remainder = timestamp % BASE; timestamp /= BASE;
-        let c2 = remainder as u8;
-        remainder = timestamp % BASE; timestamp /= BASE;
-        let c1 = remainder as u8;
-        let c0 = timestamp as u8;
+    /// Increment the packed timestamp representation by `delta` (1..=58).
+    ///
+    /// Performs base-58 addition with carry directly on the 6-bit fields
+    /// packed in `cached_timestamp_packed`, avoiding the 8 div/mod operations
+    /// of a full re-encode. For delta ≤ 58, the initial addition produces
+    /// at most carry=1 into the next higher digit.
+    #[inline(always)]
+    fn increment_encoded_timestamp(&mut self, delta: u64) {
+        // Field 7 (least significant timestamp digit) is at bits 85..80.
+        const FIELD_7_SHIFT: u32 = 80;
+        const FIELD_MASK: u128 = 0x3F;
 
-        self.index_buffer[0] = c0;
-        self.index_buffer[1] = c1;
-        self.index_buffer[2] = c2;
-        self.index_buffer[3] = c3;
-        self.index_buffer[4] = c4;
-        self.index_buffer[5] = c5;
-        self.index_buffer[6] = c6;
-        self.index_buffer[7] = c7;
+        let current = ((self.cached_timestamp_packed >> FIELD_7_SHIFT) & FIELD_MASK) as u64;
+        let headroom = MAX_INDEX as u64 - current;
+        if delta <= headroom {
+            // Common case: no carry. Add delta in place.
+            self.cached_timestamp_packed += (delta as u128) << FIELD_7_SHIFT;
+            return;
+        }
+
+        // Carry path: set field 7 to remainder, propagate carry=1 upward.
+        let remainder = delta - headroom - 1;
+        debug_assert!(remainder < BASE, "delta must be <= 58");
+        self.cached_timestamp_packed = (self.cached_timestamp_packed & !(FIELD_MASK << FIELD_7_SHIFT))
+            | ((remainder as u128) << FIELD_7_SHIFT);
+
+        // Propagate carry=1 through fields 6..0 (shifts 86, 92, ..., 122).
+        let mut shift = FIELD_7_SHIFT + 6;
+        loop {
+            let field = ((self.cached_timestamp_packed >> shift) & FIELD_MASK) as u64;
+            if field < MAX_INDEX as u64 {
+                // Room to absorb carry: increment in place.
+                self.cached_timestamp_packed += 1u128 << shift;
+                return;
+            }
+            // field == 57: wraps to 0, carry continues.
+            self.cached_timestamp_packed &= !(FIELD_MASK << shift);
+            if shift >= 122 {
+                break;
+            }
+            shift += 6;
+        }
+        // All 8 timestamp digits overflowed — timestamp exceeded MAX_TIMESTAMP.
+        panic!(
+            "Timestamp out of range: {} (valid range: 0 to {MAX_TIMESTAMP})",
+            self.timestamp_cache_ms
+        );
     }
 
     #[cold]
@@ -787,29 +841,29 @@ impl IdGenerator {
         let position = self.random_position;
         self.random_position = position + COUNTER_CHAR_COUNT;
 
-        self.index_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET]
+        self.counter_head
             .copy_from_slice(&self.random_buffer[position..position + COUNTER_HEAD_CHAR_COUNT]);
         self.counter_tail = self.random_buffer[position + COUNTER_HEAD_CHAR_COUNT];
-        self.cached_prefix = pack_prefix(&self.index_buffer);
+        self.cached_prefix = self.cached_timestamp_packed | pack_counter_head(&self.counter_head);
     }
 
     /// Handle carry propagation through the counter head indices.
     ///
     /// Called when the counter tail overflows. Walks backward through
-    /// the counter head (positions 12 down to 8). On full overflow
+    /// the counter head (positions 4 down to 0). On full overflow
     /// (all 6 counter indices maxed), bumps the timestamp forward by 1ms
     /// and reseeds. Because the counter is randomly seeded each ms,
     /// overflow probability is n / 58^6 for n IDs generated in that ms.
     #[cold]
     fn increment_carry(&mut self) {
-        for i in (TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET).rev() {
-            if self.index_buffer[i] < MAX_INDEX {
-                self.index_buffer[i] += 1;
+        for i in (0..COUNTER_HEAD_CHAR_COUNT).rev() {
+            if self.counter_head[i] < MAX_INDEX {
+                self.counter_head[i] += 1;
                 self.counter_tail = FIRST_INDEX;
-                self.cached_prefix = pack_prefix(&self.index_buffer);
+                self.cached_prefix = self.cached_timestamp_packed | pack_counter_head(&self.counter_head);
                 return;
             }
-            self.index_buffer[i] = FIRST_INDEX;
+            self.counter_head[i] = FIRST_INDEX;
         }
         // Full overflow: bump timestamp, reseed.
         self.timestamp_cache_ms += 1;
@@ -831,11 +885,9 @@ impl IdGenerator {
         self.time_function = None;
     }
 
-    /// Read the prefix buffer (timestamp + counter head indices).
-    ///
-    /// Note: these are Base58 index values (0-57), not ASCII bytes.
-    pub fn timestamp_and_counter_head(&self) -> &[u8; PREFIX_INDEX_COUNT] {
-        &self.index_buffer
+    /// Read the counter head indices (5 values, each 0-57).
+    pub fn counter_head_indices(&self) -> &[u8; COUNTER_HEAD_CHAR_COUNT] {
+        &self.counter_head
     }
 
     /// Read the counter tail index value.
@@ -855,7 +907,7 @@ impl IdGenerator {
 
     /// Set the counter head indices directly (values 0-57).
     pub fn set_counter_head(&mut self, indices: &[u8; 5]) {
-        self.index_buffer[TIMESTAMP_CHAR_COUNT..COUNTER_TAIL_OFFSET].copy_from_slice(indices);
+        self.counter_head.copy_from_slice(indices);
     }
 
     /// Set the counter tail index directly (value 0-57).

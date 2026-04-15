@@ -119,6 +119,41 @@ function encodeTimestamp(timestamp: number): void {
     char7;
 }
 
+/**
+ * Increment the cached timestamp prefix string by `delta` (1..58).
+ *
+ * Decodes the last character to a Base58 index, adds delta, and replaces
+ * the character. If the result carries (>= 58), falls back to full
+ * re-encode since carry is rare (~1/58 for delta=1).
+ */
+function incrementEncodedTimestamp(delta: number): void {
+  const newIndex = BASE58_INDEX[timestampCachePrefix.charCodeAt(7)] + delta;
+  if (newIndex < BASE) {
+    timestampCachePrefix =
+      timestampCachePrefix.substring(0, 7) + TIMESTAMP_LOOKUP[newIndex];
+    return;
+  }
+  // Carry: scan backward to find which digit absorbs carry.
+  let carryPosition = -1;
+  for (let i = 6; i >= 0; i--) {
+    if (SUCCESSOR[timestampCachePrefix.charCodeAt(i)]) {
+      carryPosition = i;
+      break;
+    }
+  }
+  if (carryPosition < 0) {
+    throw new RangeError(
+      `Timestamp out of range: ${timestampCacheMs} (valid range: 0 to ${MAX_TIMESTAMP})`,
+    );
+  }
+  // Build result once: unchanged prefix + successor + wrapped zeros + remainder.
+  timestampCachePrefix =
+    timestampCachePrefix.substring(0, carryPosition) +
+    SUCCESSOR[timestampCachePrefix.charCodeAt(carryPosition)] +
+    FIRST_CHAR.repeat(6 - carryPosition) +
+    TIMESTAMP_LOOKUP[newIndex - BASE];
+}
+
 function refillRandom(): void {
   if (randomRaw === undefined) {
     randomRaw = new Uint8Array(RANDOM_BATCH_SIZE);
@@ -214,8 +249,17 @@ export function generateId(): string {
   const timestamp = Date.now();
 
   if (timestamp > timestampCacheMs) {
-    // New millisecond (or first call): encode timestamp, seed counter.
-    encodeTimestamp(timestamp);
+    // New millisecond (or first call): update timestamp, seed counter.
+    const delta = timestamp - timestampCacheMs;
+    if (delta <= BASE) {
+      // Fast path: increment the encoded timestamp directly,
+      // avoiding 8 Math.trunc/modulo operations.
+      timestampCacheMs = timestamp;
+      incrementEncodedTimestamp(delta);
+    } else {
+      // Large jump or first call: full re-encode.
+      encodeTimestamp(timestamp);
+    }
     seedCounter();
   } else {
     // Same millisecond (or clock went backward): increment counter tail.
