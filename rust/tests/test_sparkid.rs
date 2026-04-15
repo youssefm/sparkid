@@ -1,4 +1,6 @@
 use sparkid::{IdGenerator, ParseSparkIdError, SparkId};
+
+const MAX_TIMESTAMP: u64 = 128_063_081_718_015;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -214,6 +216,43 @@ fn test_encode_preserves_counter_head() {
     gen.set_counter_head(&[33, 34, 35, 36, 37]); // a b c d e
     gen.encode_timestamp_test(12345);
     assert_eq!(&gen.timestamp_and_counter_head()[8..], &[33, 34, 35, 36, 37]);
+}
+
+// ---------------------------------------------------------------------------
+// Timestamp validation
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_encode_timestamp_zero() {
+    let mut gen = IdGenerator::new();
+    gen.encode_timestamp_test(0);
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[0, 0, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn test_encode_timestamp_max() {
+    let mut gen = IdGenerator::new();
+    gen.encode_timestamp_test(MAX_TIMESTAMP);
+    assert_eq!(&gen.timestamp_and_counter_head()[..8], &[57, 57, 57, 57, 57, 57, 57, 57]);
+}
+
+#[test]
+#[should_panic(expected = "Timestamp out of range")]
+fn test_encode_timestamp_above_max_panics() {
+    let mut gen = IdGenerator::new();
+    gen.encode_timestamp_test(MAX_TIMESTAMP + 1);
+}
+
+#[test]
+#[should_panic(expected = "Timestamp out of range")]
+fn test_counter_overflow_at_max_timestamp_panics() {
+    let mut gen = IdGenerator::new();
+    gen.set_timestamp_cache_ms(MAX_TIMESTAMP);
+    gen.encode_timestamp_test(MAX_TIMESTAMP);
+    gen.set_counter_head(&[57, 57, 57, 57, 57]); // zzzzz
+    gen.set_counter_tail(57); // z
+
+    gen.increment_carry_test();
 }
 
 // ---------------------------------------------------------------------------

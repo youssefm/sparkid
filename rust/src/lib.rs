@@ -39,3 +39,4 @@ extern crate std;
 mod generator;
 
 pub use generator::{IdGenerator, ParseSparkIdError, SparkId, SparkIdStr};
+

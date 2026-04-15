@@ -1,9 +1,10 @@
 // Comprehensive tests for the sparkid ID generator.
 // Uses Node.js built-in test runner (node:test) — zero dependencies.
 
-import { describe, it } from "node:test";
+import { describe, it, mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { generateId, extractTimestamp } from "../src/index.ts";
+import { MAX_TIMESTAMP } from "../src/constants.ts";
 import { toBytes, fromBytes } from "../src/binary.ts";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -524,7 +525,10 @@ describe("Public API", () => {
   it("generateId and extractTimestamp are the named exports", async () => {
     const mod = await import("../src/index.ts");
     const exports = Object.keys(mod);
-    assert.deepEqual(exports.sort(), ["extractTimestamp", "generateId"]);
+    assert.deepEqual(exports.sort(), [
+      "extractTimestamp",
+      "generateId",
+    ]);
   });
 
   it("binary module exports toBytes and fromBytes", async () => {
@@ -583,5 +587,31 @@ describe("extractTimestamp", () => {
     assert.throws(() => extractTimestamp(123 as any), TypeError);
     assert.throws(() => extractTimestamp(null as any), TypeError);
     assert.throws(() => extractTimestamp(undefined as any), TypeError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Timestamp validation
+// ---------------------------------------------------------------------------
+// These tests MUST be last: they mock Date.now to MAX_TIMESTAMP, which
+// permanently advances the module-level timestampCacheMs. No tests should
+// run after this block.
+
+describe("Timestamp validation", () => {
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  it("generateId() throws RangeError for timestamp above MAX_TIMESTAMP", () => {
+    // This test runs FIRST — throws before cache mutation, so cache stays at whatever it was
+    mock.method(Date, "now", () => MAX_TIMESTAMP + 1);
+    assert.throws(() => generateId(), RangeError);
+  });
+
+  it("generateId() works at MAX_TIMESTAMP boundary", () => {
+    // Mock to MAX_TIMESTAMP (always > any real cached timestamp)
+    mock.method(Date, "now", () => MAX_TIMESTAMP);
+    const id = generateId();
+    assert.equal(id.substring(0, 8), "z".repeat(8));
   });
 });

@@ -9,6 +9,7 @@ from sparkid._constants import (
     BASE,
     COUNTER_CHAR_COUNT,
     ID_LENGTH,
+    MAX_TIMESTAMP,
     RANDOM_CHAR_COUNT,
     TIMESTAMP_CHAR_COUNT,
 )
@@ -133,7 +134,6 @@ class IdGenerator:
 
         if timestamp > self._timestamp_cache_ms:
             # New millisecond (or first call): encode timestamp, seed counter.
-            self._timestamp_cache_ms = timestamp
             self._encode_timestamp(timestamp)
             self._seed_counter()
         else:
@@ -196,12 +196,17 @@ class IdGenerator:
                 return
             buf[i] = _FIRST_BYTE
         # Overflow: bump timestamp, reseed.
-        self._timestamp_cache_ms += 1
-        self._encode_timestamp(self._timestamp_cache_ms)
+        self._encode_timestamp(self._timestamp_cache_ms + 1)
         self._seed_counter()
 
     def _encode_timestamp(self, timestamp: int) -> None:
         """Base58-encode millisecond timestamp into the prefix string."""
+        if timestamp < 0 or timestamp > MAX_TIMESTAMP:
+            raise ValueError(
+                f"Timestamp out of range: {timestamp}"
+                f" (valid range: 0 to {MAX_TIMESTAMP})"
+            )
+        self._timestamp_cache_ms = timestamp
         lookup = _TIMESTAMP_LOOKUP
         timestamp, r7 = divmod(timestamp, BASE)
         timestamp, r6 = divmod(timestamp, BASE)

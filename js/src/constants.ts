@@ -9,3 +9,6 @@ export const COUNTER_CHAR_COUNT = 6;
 export const RANDOM_CHAR_COUNT = 7;
 export const ID_LENGTH =
   TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT + RANDOM_CHAR_COUNT;
+
+// Maximum encodable timestamp: 58^8 - 1 (8 Base58 chars)
+export const MAX_TIMESTAMP = BASE ** TIMESTAMP_CHAR_COUNT - 1; // 128_063_081_718_015
