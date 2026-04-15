@@ -298,33 +298,4 @@ export function extractTimestamp(id: string): Date {
   return new Date(ms);
 }
 
-// ---------------------------------------------------------------------------
-// Test internals — exported for integration tests. Not part of the public API.
-// ---------------------------------------------------------------------------
 
-/** @internal */
-export const _test = {
-  encodeTimestamp,
-  get timestampCacheMs() {
-    return timestampCacheMs;
-  },
-  get timestampCachePrefix() {
-    return timestampCachePrefix;
-  },
-  get prefixPlusCounterHead() {
-    return prefixPlusCounterHead;
-  },
-  set prefixPlusCounterHead(value: string) {
-    prefixPlusCounterHead = value;
-  },
-  get counterTailCharCode() {
-    return counterTailCharCode;
-  },
-  set counterTailCharCode(value: number) {
-    counterTailCharCode = value;
-  },
-  set timestampCacheMs(value: number) {
-    timestampCacheMs = value;
-  },
-  incrementCarry,
-};

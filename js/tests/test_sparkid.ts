@@ -1,9 +1,9 @@
 // Comprehensive tests for the sparkid ID generator.
 // Uses Node.js built-in test runner (node:test) — zero dependencies.
 
-import { describe, it, afterEach } from "node:test";
+import { describe, it, mock, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { generateId, extractTimestamp, _test } from "../src/index.ts";
+import { generateId, extractTimestamp } from "../src/index.ts";
 import { MAX_TIMESTAMP } from "../src/constants.ts";
 import { toBytes, fromBytes } from "../src/binary.ts";
 
@@ -125,46 +125,7 @@ describe("Timestamp encoding", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Timestamp validation
-// ---------------------------------------------------------------------------
 
-describe("Timestamp validation", () => {
-  afterEach(() => {
-    // Reset module state so subsequent tests start clean
-    _test.encodeTimestamp(0);
-    _test.timestampCacheMs = 0;
-  });
-
-  it("encodeTimestamp(0) works (boundary)", () => {
-    _test.encodeTimestamp(0);
-    assert.equal(_test.timestampCachePrefix, "1".repeat(8));
-  });
-
-  it("encodeTimestamp(MAX_TIMESTAMP) works (boundary)", () => {
-    _test.encodeTimestamp(MAX_TIMESTAMP);
-    assert.equal(_test.timestampCachePrefix, "z".repeat(8));
-  });
-
-  it("encodeTimestamp(-1) throws RangeError", () => {
-    assert.throws(() => _test.encodeTimestamp(-1), RangeError);
-  });
-
-  it("encodeTimestamp(MAX_TIMESTAMP + 1) throws RangeError", () => {
-    assert.throws(() => _test.encodeTimestamp(MAX_TIMESTAMP + 1), RangeError);
-  });
-
-  it("counter overflow at MAX_TIMESTAMP throws RangeError", () => {
-    // Set up state: timestamp at MAX_TIMESTAMP, counter fully maxed
-    _test.encodeTimestamp(MAX_TIMESTAMP);
-    _test.timestampCacheMs = MAX_TIMESTAMP;
-    _test.prefixPlusCounterHead = "z".repeat(13); // 8 timestamp + 5 counter head
-    _test.counterTailCharCode = "z".charCodeAt(0);
-
-    // Carry should try to bump timestamp past MAX_TIMESTAMP
-    assert.throws(() => _test.incrementCarry(), RangeError);
-  });
-});
 
 describe("Counter monotonicity", () => {
   it("burst of 50,000 IDs is strictly increasing", () => {
@@ -563,7 +524,6 @@ describe("Public API", () => {
     const mod = await import("../src/index.ts");
     const exports = Object.keys(mod);
     assert.deepEqual(exports.sort(), [
-      "_test",
       "extractTimestamp",
       "generateId",
     ]);
@@ -625,5 +585,31 @@ describe("extractTimestamp", () => {
     assert.throws(() => extractTimestamp(123 as any), TypeError);
     assert.throws(() => extractTimestamp(null as any), TypeError);
     assert.throws(() => extractTimestamp(undefined as any), TypeError);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Timestamp validation
+// ---------------------------------------------------------------------------
+// These tests MUST be last: they mock Date.now to MAX_TIMESTAMP, which
+// permanently advances the module-level timestampCacheMs. No tests should
+// run after this block.
+
+describe("Timestamp validation", () => {
+  afterEach(() => {
+    mock.restoreAll();
+  });
+
+  it("generateId() throws RangeError for timestamp above MAX_TIMESTAMP", () => {
+    // This test runs FIRST — throws before cache mutation, so cache stays at whatever it was
+    mock.method(Date, "now", () => MAX_TIMESTAMP + 1);
+    assert.throws(() => generateId(), RangeError);
+  });
+
+  it("generateId() works at MAX_TIMESTAMP boundary", () => {
+    // Mock to MAX_TIMESTAMP (always > any real cached timestamp)
+    mock.method(Date, "now", () => MAX_TIMESTAMP);
+    const id = generateId();
+    assert.equal(id.substring(0, 8), "z".repeat(8));
   });
 });

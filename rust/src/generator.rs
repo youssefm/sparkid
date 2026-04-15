@@ -36,10 +36,7 @@ const INVALID_INDEX: u8 = 0xFF;
 const PACKED_BYTE_COUNT: usize = 16;
 
 // Maximum encodable timestamp: 58^8 - 1 (8 Base58 chars)
-#[cfg(not(any(test, feature = "test-internals")))]
 const MAX_TIMESTAMP: u64 = BASE.pow(TIMESTAMP_CHAR_COUNT as u32) - 1; // 128_063_081_718_015
-#[cfg(any(test, feature = "test-internals"))]
-pub const MAX_TIMESTAMP: u64 = BASE.pow(TIMESTAMP_CHAR_COUNT as u32) - 1;
 
 // Derived layout constants
 const COUNTER_HEAD_CHAR_COUNT: usize = COUNTER_CHAR_COUNT - 1;

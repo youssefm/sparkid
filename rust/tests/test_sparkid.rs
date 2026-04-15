@@ -1,4 +1,6 @@
-use sparkid::{IdGenerator, ParseSparkIdError, SparkId, MAX_TIMESTAMP};
+use sparkid::{IdGenerator, ParseSparkIdError, SparkId};
+
+const MAX_TIMESTAMP: u64 = 128_063_081_718_015;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};

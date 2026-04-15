@@ -135,7 +135,6 @@ class IdGenerator:
         if timestamp > self._timestamp_cache_ms:
             # New millisecond (or first call): encode timestamp, seed counter.
             self._encode_timestamp(timestamp)
-            self._timestamp_cache_ms = timestamp
             self._seed_counter()
         else:
             # Same millisecond (or clock went backward): increment counter tail.
@@ -198,7 +197,6 @@ class IdGenerator:
             buf[i] = _FIRST_BYTE
         # Overflow: bump timestamp, reseed.
         self._encode_timestamp(self._timestamp_cache_ms + 1)
-        self._timestamp_cache_ms += 1
         self._seed_counter()
 
     def _encode_timestamp(self, timestamp: int) -> None:
@@ -208,6 +206,7 @@ class IdGenerator:
                 f"Timestamp out of range: {timestamp}"
                 f" (valid range: 0 to {MAX_TIMESTAMP})"
             )
+        self._timestamp_cache_ms = timestamp
         lookup = _TIMESTAMP_LOOKUP
         timestamp, r7 = divmod(timestamp, BASE)
         timestamp, r6 = divmod(timestamp, BASE)
