@@ -39,3 +39,6 @@ extern crate std;
 mod generator;
 
 pub use generator::{IdGenerator, ParseSparkIdError, SparkId, SparkIdStr};
+
+#[cfg(feature = "test-internals")]
+pub use generator::MAX_TIMESTAMP;

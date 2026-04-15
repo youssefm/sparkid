@@ -5,6 +5,7 @@ import {
   COUNTER_CHAR_COUNT,
   RANDOM_CHAR_COUNT,
   ID_LENGTH,
+  MAX_TIMESTAMP,
 } from "./constants";
 
 // How many random bytes to fetch per batch. After rejection sampling,
@@ -79,6 +80,11 @@ let prefixPlusCounterHead = "";
 let counterTailCharCode = FIRST_CHAR_CODE;
 
 function encodeTimestamp(timestamp: number): void {
+  if (timestamp < 0 || timestamp > MAX_TIMESTAMP) {
+    throw new RangeError(
+      `Timestamp out of range: ${timestamp} (valid range: 0 to ${MAX_TIMESTAMP})`,
+    );
+  }
   timestampCacheMs = timestamp;
   let remainder: number;
   remainder = timestamp % BASE;
@@ -173,8 +179,7 @@ function incrementCarry(): void {
     }
   }
   // Full overflow: bump timestamp, reseed.
-  timestampCacheMs += 1;
-  encodeTimestamp(timestampCacheMs);
+  encodeTimestamp(timestampCacheMs + 1);
   seedCounter();
 }
 
@@ -292,3 +297,34 @@ export function extractTimestamp(id: string): Date {
   }
   return new Date(ms);
 }
+
+// ---------------------------------------------------------------------------
+// Test internals — exported for integration tests. Not part of the public API.
+// ---------------------------------------------------------------------------
+
+/** @internal */
+export const _test = {
+  encodeTimestamp,
+  get timestampCacheMs() {
+    return timestampCacheMs;
+  },
+  get timestampCachePrefix() {
+    return timestampCachePrefix;
+  },
+  get prefixPlusCounterHead() {
+    return prefixPlusCounterHead;
+  },
+  set prefixPlusCounterHead(value: string) {
+    prefixPlusCounterHead = value;
+  },
+  get counterTailCharCode() {
+    return counterTailCharCode;
+  },
+  set counterTailCharCode(value: number) {
+    counterTailCharCode = value;
+  },
+  set timestampCacheMs(value: number) {
+    timestampCacheMs = value;
+  },
+  incrementCarry,
+};

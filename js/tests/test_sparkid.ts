@@ -1,9 +1,10 @@
 // Comprehensive tests for the sparkid ID generator.
 // Uses Node.js built-in test runner (node:test) — zero dependencies.
 
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { generateId, extractTimestamp } from "../src/index.ts";
+import { generateId, extractTimestamp, _test } from "../src/index.ts";
+import { MAX_TIMESTAMP } from "../src/constants.ts";
 import { toBytes, fromBytes } from "../src/binary.ts";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -125,8 +126,45 @@ describe("Timestamp encoding", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Counter monotonicity
+// Timestamp validation
 // ---------------------------------------------------------------------------
+
+describe("Timestamp validation", () => {
+  afterEach(() => {
+    // Reset module state so subsequent tests start clean
+    _test.encodeTimestamp(0);
+    _test.timestampCacheMs = 0;
+  });
+
+  it("encodeTimestamp(0) works (boundary)", () => {
+    _test.encodeTimestamp(0);
+    assert.equal(_test.timestampCachePrefix, "1".repeat(8));
+  });
+
+  it("encodeTimestamp(MAX_TIMESTAMP) works (boundary)", () => {
+    _test.encodeTimestamp(MAX_TIMESTAMP);
+    assert.equal(_test.timestampCachePrefix, "z".repeat(8));
+  });
+
+  it("encodeTimestamp(-1) throws RangeError", () => {
+    assert.throws(() => _test.encodeTimestamp(-1), RangeError);
+  });
+
+  it("encodeTimestamp(MAX_TIMESTAMP + 1) throws RangeError", () => {
+    assert.throws(() => _test.encodeTimestamp(MAX_TIMESTAMP + 1), RangeError);
+  });
+
+  it("counter overflow at MAX_TIMESTAMP throws RangeError", () => {
+    // Set up state: timestamp at MAX_TIMESTAMP, counter fully maxed
+    _test.encodeTimestamp(MAX_TIMESTAMP);
+    _test.timestampCacheMs = MAX_TIMESTAMP;
+    _test.prefixPlusCounterHead = "z".repeat(13); // 8 timestamp + 5 counter head
+    _test.counterTailCharCode = "z".charCodeAt(0);
+
+    // Carry should try to bump timestamp past MAX_TIMESTAMP
+    assert.throws(() => _test.incrementCarry(), RangeError);
+  });
+});
 
 describe("Counter monotonicity", () => {
   it("burst of 50,000 IDs is strictly increasing", () => {
@@ -524,7 +562,11 @@ describe("Public API", () => {
   it("generateId and extractTimestamp are the named exports", async () => {
     const mod = await import("../src/index.ts");
     const exports = Object.keys(mod);
-    assert.deepEqual(exports.sort(), ["extractTimestamp", "generateId"]);
+    assert.deepEqual(exports.sort(), [
+      "_test",
+      "extractTimestamp",
+      "generateId",
+    ]);
   });
 
   it("binary module exports toBytes and fromBytes", async () => {

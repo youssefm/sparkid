@@ -7,6 +7,7 @@ from collections import Counter
 from unittest.mock import patch
 
 from sparkid import IdGenerator, extract_timestamp, from_bytes, generate_id, to_bytes
+from sparkid._constants import MAX_TIMESTAMP
 from sparkid._generator import (
     _FIRST_CHAR,
     ALPHABET,
@@ -161,6 +162,50 @@ class TestTimestampEncoding:
         gen._prefix_plus_counter_head = "XXXXXXXX" + "abcde"
         gen._encode_timestamp(12345)
         assert gen._prefix_plus_counter_head[8:] == "abcde"
+
+
+# ---------------------------------------------------------------------------
+# Timestamp validation
+# ---------------------------------------------------------------------------
+
+
+class TestTimestampValidation:
+    def test_encode_timestamp_zero(self):
+        gen = IdGenerator()
+        gen._encode_timestamp(0)
+        assert gen._prefix_plus_counter_head[:8] == "1" * 8
+
+    def test_encode_timestamp_max(self):
+        gen = IdGenerator()
+        gen._encode_timestamp(MAX_TIMESTAMP)
+        assert gen._prefix_plus_counter_head[:8] == "z" * 8
+
+    def test_encode_timestamp_negative_raises(self):
+        import pytest
+
+        gen = IdGenerator()
+        with pytest.raises(ValueError, match="Timestamp out of range"):
+            gen._encode_timestamp(-1)
+
+    def test_encode_timestamp_above_max_raises(self):
+        import pytest
+
+        gen = IdGenerator()
+        with pytest.raises(ValueError, match="Timestamp out of range"):
+            gen._encode_timestamp(MAX_TIMESTAMP + 1)
+
+    def test_counter_overflow_at_max_timestamp_raises(self):
+        import pytest
+
+        gen = IdGenerator()
+        gen._timestamp_cache_ms = MAX_TIMESTAMP
+        gen._encode_timestamp(MAX_TIMESTAMP)
+        gen._prefix_plus_counter_head = gen._prefix_plus_counter_head[:8] + "zzzzz"
+        gen._counter_head_buf = bytearray([ord("z")] * 5)
+        gen._counter_tail = "z"
+
+        with pytest.raises(ValueError, match="Timestamp out of range"):
+            gen._increment_counter_carry()
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +658,7 @@ class TestPublicAPI:
         assert hasattr(sparkid, "to_bytes")
         assert hasattr(sparkid, "from_bytes")
         assert hasattr(sparkid, "IdGenerator")
+        assert not hasattr(sparkid, "MAX_TIMESTAMP")
         assert sparkid.__all__ == [
             "generate_id",
             "extract_timestamp",
