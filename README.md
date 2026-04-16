@@ -28,6 +28,10 @@ Available for [JavaScript/TypeScript](#javascript), [Python](#python), and [Rust
 
 sparkid gives you compact, readable IDs that sort by creation time and are strictly monotonically increasing — no two IDs from the same generator will ever compare equal or out of order.
 
+It's also the fastest option across all three languages:
+
+![Benchmark comparison — sparkid vs. UUID v4, UUID v7, nanoid, and ulid across Python, JavaScript, and Rust](benchmark_comparison.png)
+
 ## How it works
 
 Each ID is 21 characters built from three parts:
