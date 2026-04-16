@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
 
@@ -29,7 +30,7 @@ Repository = "https://github.com/youssefm/sparkid"
 
 [dependency-groups]
 test = ["pytest"]
-bench = ["nanoid", "python-ulid", "typing-extensions", "uuid-utils"]
+bench = ["nanoid", "python-ulid"]
 dev = ["ruff>=0.15.8"]
 
 [tool.hatch.build.targets.wheel]
