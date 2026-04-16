@@ -48,6 +48,7 @@ for (let i = 0; i < BASE - 1; i++) {
 }
 
 // Reverse lookup: charCode -> Base58 index (0-57), or -1 if invalid.
+// Out-of-bounds access (charCode >= 123) returns undefined, not -1.
 // Used for timestamp decoding in extractTimestamp.
 const BASE58_INDEX: Int8Array = new Int8Array(SUCCESSOR_TABLE_SIZE).fill(-1);
 for (let i = 0; i < BASE; i++) {
@@ -324,7 +325,7 @@ export function extractTimestamp(id: string): Date {
   let ms = 0;
   for (let i = 0; i < TIMESTAMP_CHAR_COUNT; i++) {
     const idx = BASE58_INDEX[id.charCodeAt(i)];
-    if (idx === -1) {
+    if (!(idx >= 0)) {
       throw new TypeError(
         `extractTimestamp: invalid Base58 character '${id[i]}' at position ${i}`,
       );
@@ -333,7 +334,7 @@ export function extractTimestamp(id: string): Date {
   }
   for (let i = TIMESTAMP_CHAR_COUNT; i < ID_LENGTH; i++) {
     const idx = BASE58_INDEX[id.charCodeAt(i)];
-    if (idx === -1) {
+    if (!(idx >= 0)) {
       throw new TypeError(
         `extractTimestamp: invalid Base58 character '${id[i]}' at position ${i}`,
       );

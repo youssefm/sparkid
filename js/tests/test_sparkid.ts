@@ -581,6 +581,10 @@ describe("extractTimestamp", () => {
     assert.throws(() => extractTimestamp("O" + "1".repeat(20)), TypeError);
     assert.throws(() => extractTimestamp("I" + "1".repeat(20)), TypeError);
     assert.throws(() => extractTimestamp("l" + "1".repeat(20)), TypeError);
+    assert.throws(() => extractTimestamp("~" + "1".repeat(20)), TypeError);
+    assert.throws(() => extractTimestamp("{" + "1".repeat(20)), TypeError);
+    assert.throws(() => extractTimestamp("1".repeat(20) + "|"), TypeError);
+    assert.throws(() => extractTimestamp("€" + "1".repeat(20)), TypeError);
   });
 
   it("throws TypeError for non-string input", () => {
