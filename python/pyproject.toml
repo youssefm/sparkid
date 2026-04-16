@@ -30,7 +30,7 @@ Repository = "https://github.com/youssefm/sparkid"
 
 [dependency-groups]
 test = ["pytest"]
-bench = ["nanoid", "python-ulid"]
+bench = ["nanoid", "python-ulid", "typing_extensions"]
 dev = ["ruff>=0.15.8"]
 
 [tool.hatch.build.targets.wheel]

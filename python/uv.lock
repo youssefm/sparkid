@@ -172,6 +172,7 @@ source = { editable = "." }
 bench = [
     { name = "nanoid" },
     { name = "python-ulid" },
+    { name = "typing-extensions" },
 ]
 dev = [
     { name = "ruff" },
@@ -187,6 +188,7 @@ test = [
 bench = [
     { name = "nanoid" },
     { name = "python-ulid" },
+    { name = "typing-extensions" },
 ]
 dev = [{ name = "ruff", specifier = ">=0.15.8" }]
 test = [{ name = "pytest" }]
