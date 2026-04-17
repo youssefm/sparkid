@@ -1344,6 +1344,497 @@ fn test_from_bytes_boundary_value_58_invalid() {
 }
 
 // ---------------------------------------------------------------------------
+// Binary ↔ String alignment
+// ---------------------------------------------------------------------------
+
+/// Build a 21-char string where position `pos` has alphabet char at `index`
+/// and every other position has '1' (index 0).
+fn string_with_single_index(position: usize, index: u8) -> String {
+    let alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let mut chars = [b'1'; 21];
+    chars[position] = alphabet[index as usize];
+    String::from_utf8(chars.to_vec()).unwrap()
+}
+
+#[test]
+fn test_each_position_maps_to_correct_bit_field() {
+    // For each of the 21 character positions, place a single non-zero index
+    // and verify it lands in exactly the right 6-bit field of the u128.
+    for position in 0..21 {
+        let index: u8 = 1; // minimal non-zero
+        let s = string_with_single_index(position, index);
+        let id: SparkId = s.parse().unwrap();
+
+        let expected = if position < 20 {
+            // Positions 0..19: index is at bits (122 - pos*6)..(127 - pos*6)
+            (index as u128) << (122 - position * 6)
+        } else {
+            // Position 20: shifted left by 2 for padding
+            (index as u128) << 2
+        };
+        assert_eq!(
+            id.as_u128(),
+            expected,
+            "position {position}: expected {expected:#034x}, got {:#034x}",
+            id.as_u128()
+        );
+    }
+}
+
+#[test]
+fn test_max_index_at_each_position() {
+    // Same as above but with max index (57 → 'z') to test full 6-bit range.
+    for position in 0..21 {
+        let index: u8 = 57;
+        let s = string_with_single_index(position, index);
+        let id: SparkId = s.parse().unwrap();
+
+        // All other positions are '1' = index 0, so only the target field
+        // contributes to the u128 value.
+        let expected = if position < 20 {
+            (index as u128) << (122 - position * 6)
+        } else {
+            (index as u128) << 2
+        };
+        assert_eq!(
+            id.as_u128(),
+            expected,
+            "position {position} with max index"
+        );
+    }
+}
+
+#[test]
+fn test_crafted_strings_match_expected_binary() {
+    // Each case: (string, description, expected u128 computed by hand / formula)
+    struct Case {
+        string: &'static str,
+        description: &'static str,
+    }
+
+    let cases = [
+        Case {
+            string: "111111111111111111111",
+            description: "all index-0",
+        },
+        Case {
+            string: "zzzzzzzzzzzzzzzzzzzzz",
+            description: "all index-57",
+        },
+        Case {
+            string: "211111111111111111111",
+            description: "index-1 at position 0 only",
+        },
+        Case {
+            string: "111111111111111111112",
+            description: "index-1 at position 20 only",
+        },
+        Case {
+            string: "zzzzzzzz1111111111111",
+            description: "max timestamp, min counter+random",
+        },
+        Case {
+            string: "11111111zzzzzz1111111",
+            description: "min timestamp, max counter, min random",
+        },
+        Case {
+            string: "11111111111111zzzzzzz",
+            description: "min timestamp+counter, max random",
+        },
+        Case {
+            string: "9AHJNPZakm11111111111",
+            description: "alphabet gap boundary chars in timestamp",
+        },
+    ];
+
+    // Independent oracle: compute u128 from string without reusing library code
+    let alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    for case in &cases {
+        let bytes = case.string.as_bytes();
+        assert_eq!(bytes.len(), 21, "bad test case: {}", case.description);
+
+        // Manually pack: positions 0..19 shift left by 6 each, position 20 shifts left by 8
+        let mut expected: u128 = 0;
+        for i in 0..20 {
+            let idx = alphabet.iter().position(|&c| c == bytes[i]).unwrap() as u128;
+            expected = (expected << 6) | idx;
+        }
+        let last_idx = alphabet.iter().position(|&c| c == bytes[20]).unwrap() as u128;
+        expected = (expected << 8) | (last_idx << 2);
+
+        let id: SparkId = case.string.parse().unwrap();
+
+        // Binary matches independent encoding
+        assert_eq!(
+            id.as_u128(),
+            expected,
+            "binary mismatch for case: {}",
+            case.description
+        );
+
+        // String round-trips through binary
+        assert_eq!(
+            &*id.as_str(),
+            case.string,
+            "string mismatch for case: {}",
+            case.description
+        );
+
+        // Bytes are big-endian of u128
+        assert_eq!(
+            id.to_bytes(),
+            expected.to_be_bytes(),
+            "bytes mismatch for case: {}",
+            case.description
+        );
+    }
+}
+
+#[test]
+fn test_sort_order_agrees_across_representations() {
+    // Pairs that differ at alphabet discontinuities (gaps in Base58 where
+    // the ASCII distance between adjacent-index chars is > 1).
+    // Each pair: (lesser, greater, description)
+    let pairs: &[(&str, &str, &str)] = &[
+        // Differ at position 0: '9' (index 8) vs 'A' (index 9)
+        (
+            "911111111111111111111",
+            "A11111111111111111111",
+            "gap: 9 < A at pos 0",
+        ),
+        // Differ at position 0: 'H' (index 16) vs 'J' (index 17) — skips 'I'
+        (
+            "H11111111111111111111",
+            "J11111111111111111111",
+            "gap: H < J at pos 0",
+        ),
+        // Differ at position 0: 'N' (index 21) vs 'P' (index 22) — skips 'O'
+        (
+            "N11111111111111111111",
+            "P11111111111111111111",
+            "gap: N < P at pos 0",
+        ),
+        // Differ at position 5: 'Z' (index 32) vs 'a' (index 33)
+        (
+            "11111Z111111111111111",
+            "11111a111111111111111",
+            "gap: Z < a at pos 5",
+        ),
+        // Differ at position 10: 'k' (index 43) vs 'm' (index 44) — skips 'l'
+        (
+            "1111111111k1111111111",
+            "1111111111m1111111111",
+            "gap: k < m at pos 10",
+        ),
+        // Differ at last position (20): boundary padding correctness
+        (
+            "111111111111111111111",
+            "111111111111111111112",
+            "differ at pos 20 only",
+        ),
+        // Differ at segment boundary: pos 7 (timestamp end) > pos 8 (counter start)
+        (
+            "11111111211111111111z",
+            "11111112111111111111z",
+            "pos 8 '2' < pos 7 '2' (higher position dominates)",
+        ),
+        // Differ at segment boundary: pos 13 (counter end) > pos 14 (random start)
+        (
+            "11111111111111211111z",
+            "11111111111112111111z",
+            "pos 14 '2' < pos 13 '2' (higher position dominates)",
+        ),
+        // Full extremes
+        (
+            "111111111111111111111",
+            "zzzzzzzzzzzzzzzzzzzzz",
+            "all-min vs all-max",
+        ),
+        // Differ across a wide index gap at position 15
+        (
+            "111111111111111111111",
+            "111111111111111z11111",
+            "index 0 vs 57 at pos 15",
+        ),
+    ];
+
+    for &(lesser_str, greater_str, description) in pairs {
+        let lesser: SparkId = lesser_str.parse().unwrap();
+        let greater: SparkId = greater_str.parse().unwrap();
+
+        // String order
+        assert!(
+            lesser_str < greater_str,
+            "string order failed: {description}"
+        );
+
+        // u128 order
+        assert!(
+            lesser.as_u128() < greater.as_u128(),
+            "u128 order failed: {description}"
+        );
+
+        // Byte order
+        assert!(
+            lesser.to_bytes() < greater.to_bytes(),
+            "byte order failed: {description}"
+        );
+
+        // SparkId Ord order
+        assert!(lesser < greater, "SparkId Ord failed: {description}");
+    }
+}
+
+#[test]
+fn test_byte_group_boundaries() {
+    // Verify the 3-byte grouping from the spec:
+    // bytes 0-2 = chars 0-3, bytes 3-5 = chars 4-7, etc.
+    // Place a known index at the first and last char of each group
+    // and check exactly which bytes are affected.
+    let group_boundaries: &[(usize, usize)] = &[
+        (0, 3),   // group 0: bytes 0-2
+        (4, 7),   // group 1: bytes 3-5
+        (8, 11),  // group 2: bytes 6-8
+        (12, 15), // group 3: bytes 9-11
+        (16, 19), // group 4: bytes 12-14
+    ];
+
+    for &(first_char, last_char) in group_boundaries {
+        let group_index = first_char / 4;
+        let byte_start = group_index * 3;
+        let byte_end = byte_start + 3; // exclusive
+
+        // Place max index at first_char of group
+        let s = string_with_single_index(first_char, 57);
+        let id: SparkId = s.parse().unwrap();
+        let bytes = id.to_bytes();
+
+        // Non-zero bytes should only be within this group's range
+        for (i, &byte) in bytes.iter().enumerate() {
+            if i >= byte_start && i < byte_end {
+                // may or may not be non-zero depending on bit alignment
+                continue;
+            }
+            if i == 15 {
+                // byte 15 holds char 20 + padding; skip in this check
+                continue;
+            }
+            assert_eq!(
+                byte, 0,
+                "char {first_char} (group {group_index}) leaked into byte {i}"
+            );
+        }
+
+        // Same for last_char of group
+        let s = string_with_single_index(last_char, 57);
+        let id: SparkId = s.parse().unwrap();
+        let bytes = id.to_bytes();
+        for (i, &byte) in bytes.iter().enumerate() {
+            if i >= byte_start && i < byte_end {
+                continue;
+            }
+            if i == 15 {
+                continue;
+            }
+            assert_eq!(
+                byte, 0,
+                "char {last_char} (group {group_index}) leaked into byte {i}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_position_20_padding_is_always_zero() {
+    // For every valid index at position 20, the bottom 2 bits must be zero.
+    for index in 0..58u8 {
+        let s = string_with_single_index(20, index);
+        let id: SparkId = s.parse().unwrap();
+        assert_eq!(
+            id.as_u128() & 0x03,
+            0,
+            "padding non-zero for index {index} at position 20"
+        );
+    }
+}
+
+#[test]
+fn test_timestamp_ms_agrees_with_string_decode() {
+    // Verify timestamp_ms() returns the same value as manually decoding
+    // the first 8 characters of the string representation.
+    let mut gen = IdGenerator::new();
+    for _ in 0..50 {
+        let id = gen.next_id();
+        let s = id.as_str();
+        let string_timestamp = decode_timestamp(&s[..8]);
+        assert_eq!(
+            id.timestamp_ms(),
+            string_timestamp,
+            "timestamp_ms() disagrees with string decode for {s}"
+        );
+    }
+}
+
+/// Build a u128 with a single 6-bit field set to `index` at position `pos`,
+/// all other fields zero. This is the binary→string counterpart of
+/// `string_with_single_index`.
+fn u128_with_single_index(position: usize, index: u8) -> u128 {
+    if position < 20 {
+        (index as u128) << (122 - position * 6)
+    } else {
+        (index as u128) << 2
+    }
+}
+
+#[test]
+fn test_binary_to_string_each_position() {
+    // Construct u128 values with a known index at each position,
+    // convert to string via as_str(), and verify the character independently.
+    let alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+    for position in 0..21 {
+        for &index in &[0u8, 1, 28, 57] {
+            let value = u128_with_single_index(position, index);
+            let id = SparkId::from_u128(value).unwrap();
+            let s = id.as_str();
+            let chars: Vec<u8> = s.bytes().collect();
+
+            // The target position should have the expected alphabet character
+            assert_eq!(
+                chars[position], alphabet[index as usize],
+                "position {position}, index {index}: expected '{}', got '{}'",
+                alphabet[index as usize] as char, chars[position] as char
+            );
+
+            // All other positions should be '1' (index 0)
+            for (i, &ch) in chars.iter().enumerate() {
+                if i != position {
+                    assert_eq!(
+                        ch, b'1',
+                        "position {i} should be '1' when only position {position} is set"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_binary_to_string_crafted_u128_values() {
+    // Construct u128 from explicit indices, verify as_str() produces the
+    // expected string. This is a pure binary→string test using an independent
+    // oracle (manual index→char mapping).
+    let alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+    struct Case {
+        indices: [u8; 21],
+        description: &'static str,
+    }
+
+    let cases = [
+        Case {
+            indices: [0; 21],
+            description: "all zeros → all '1's",
+        },
+        Case {
+            indices: [57; 21],
+            description: "all 57s → all 'z's",
+        },
+        Case {
+            // Ascending indices: 0,1,2,...,20
+            indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+            description: "ascending indices",
+        },
+        Case {
+            // Descending indices: 57,56,...,37
+            indices: [
+                57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38,
+                37,
+            ],
+            description: "descending from max",
+        },
+        Case {
+            // Alphabet gap boundary indices: 8(='9'), 9(='A'), 16(='H'), 17(='J'),
+            // 21(='N'), 22(='P'), 32(='Z'), 33(='a'), 43(='k'), 44(='m')
+            indices: [8, 9, 16, 17, 21, 22, 32, 33, 43, 44, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            description: "alphabet gap boundary indices",
+        },
+        Case {
+            // Max timestamp (57*8), min counter (0*6), max random (57*7)
+            indices: [
+                57, 57, 57, 57, 57, 57, 57, 57, 0, 0, 0, 0, 0, 0, 57, 57, 57, 57, 57, 57, 57,
+            ],
+            description: "max timestamp + min counter + max random",
+        },
+    ];
+
+    for case in &cases {
+        // Build expected string from indices
+        let expected: String = case
+            .indices
+            .iter()
+            .map(|&idx| alphabet[idx as usize] as char)
+            .collect();
+
+        // Build u128 from indices (same packing as the spec)
+        let mut value: u128 = 0;
+        for i in 0..20 {
+            value = (value << 6) | case.indices[i] as u128;
+        }
+        value = (value << 8) | (case.indices[20] as u128) << 2;
+
+        let id = SparkId::from_u128(value).unwrap();
+        let actual = id.as_str();
+
+        assert_eq!(
+            &*actual, &expected,
+            "binary→string mismatch for case: {}",
+            case.description
+        );
+    }
+}
+
+#[test]
+fn test_from_bytes_to_string_field_extraction() {
+    // Construct 16-byte arrays by hand, convert via from_bytes,
+    // and verify the string output matches expected characters.
+    let alphabet = b"123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+    // All-zero bytes → all index-0 → "111111111111111111111"
+    let bytes = [0u8; 16];
+    let id = SparkId::from_bytes(bytes).unwrap();
+    assert_eq!(&*id.as_str(), "111111111111111111111");
+
+    // Bytes with known pattern: set byte 0 to pack indices for chars 0-1.
+    // Byte 0 holds bits 127-120: top 6 bits = char 0, next 2 bits = top 2 of char 1.
+    // Place index 9 (='A') at char 0: bits 127-122 = 001001
+    // Char 1 stays 0: bits 121-116 = 000000
+    // So byte 0 = 0b00100100 = 0x24
+    let mut bytes = [0u8; 16];
+    bytes[0] = 0x24;
+    let id = SparkId::from_bytes(bytes).unwrap();
+    let s = id.as_str();
+    assert_eq!(
+        s.as_bytes()[0],
+        alphabet[9],
+        "byte 0 = 0x24 should give 'A' at position 0, got '{}'",
+        s.as_bytes()[0] as char
+    );
+
+    // Place index 57 (='z') at char 20 (last): byte 15 = 57 << 2 = 0xE4
+    let mut bytes = [0u8; 16];
+    bytes[15] = 57 << 2; // 0xE4
+    let id = SparkId::from_bytes(bytes).unwrap();
+    let s = id.as_str();
+    assert_eq!(
+        s.as_bytes()[20],
+        alphabet[57],
+        "byte 15 = 0xE4 should give 'z' at position 20, got '{}'",
+        s.as_bytes()[20] as char
+    );
+}
+
+// ---------------------------------------------------------------------------
 // serde
 // ---------------------------------------------------------------------------
 

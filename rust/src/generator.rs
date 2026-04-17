@@ -52,6 +52,19 @@ const MAX_TIMESTAMP: u64 = BASE.pow(TIMESTAMP_CHAR_COUNT as u32) - 1; // 128_063
 // Derived layout constants
 const COUNTER_HEAD_CHAR_COUNT: usize = COUNTER_CHAR_COUNT - 1;
 
+// Forward-lookup table padded to 64 entries so that `index & 0x3F` (0-63) is
+// always in bounds. Lets the compiler eliminate bounds checks in `from_packed`.
+// Indices 58-63 map to 0 and are never accessed for valid SparkIds.
+const ALPHABET_LOOKUP: [u8; 64] = {
+    let mut table = [0u8; 64];
+    let mut i = 0;
+    while i < 58 {
+        table[i] = ALPHABET[i];
+        i += 1;
+    }
+    table
+};
+
 // Reverse-lookup table: ASCII byte -> Base58 index (0-57), or 0xFF for invalid.
 const DECODE: [u8; 256] = {
     let mut table = [INVALID_INDEX; 256];
@@ -328,12 +341,13 @@ impl SparkId {
 // ---------------------------------------------------------------------------
 
 impl SparkIdStr {
+    #[inline]
     pub(crate) fn from_packed(value: u128) -> Self {
         let mut out = [0u8; ID_LENGTH];
         let mut shift = 122i32; // first index at bits 127..122
         let mut i = 0;
         while i < 21 {
-            out[i] = ALPHABET[((value >> shift as u32) & 0x3F) as usize];
+            out[i] = ALPHABET_LOOKUP[((value >> shift as u32) & 0x3F) as usize];
             shift -= 6;
             i += 1;
         }
