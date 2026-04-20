@@ -895,12 +895,12 @@ class TestGenerateAt:
         decoded = _decode_timestamp(id_[:8])
         assert decoded == ts
 
-    def test_bool_raises_typeerror(self):
+    def test_bool_accepted_as_int(self):
         gen = IdGenerator()
-        with pytest.raises(TypeError):
-            gen.generate_at(True)
-        with pytest.raises(TypeError):
-            gen.generate_at(False)
+        id_true = gen.generate_at(True)
+        id_false = gen.generate_at(False)
+        assert len(id_true) == 21
+        assert len(id_false) == 21
 
     def test_float_raises_typeerror(self):
         gen = IdGenerator()

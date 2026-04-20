@@ -84,14 +84,9 @@ class IdGenerator:
             A 21-character Base58 sparkid string.
 
         Raises:
-            TypeError: If *timestamp* is not a ``datetime`` or ``int``, or is
-                a ``bool``.
+            TypeError: If *timestamp* is not a ``datetime`` or ``int``.
             ValueError: If a ``datetime`` is naive (no tzinfo).
         """
-        if isinstance(timestamp, bool):
-            raise TypeError(
-                "timestamp must be a datetime or int, got bool"
-            )
         if isinstance(timestamp, datetime):
             if timestamp.tzinfo is None:
                 raise ValueError("timestamp must be timezone-aware")
@@ -123,15 +118,10 @@ def generate_id_at(timestamp: "datetime | int") -> str:
         A 21-character Base58 sparkid string.
 
     Raises:
-        TypeError: If *timestamp* is not a ``datetime`` or ``int``, or is a
-            ``bool``.
+        TypeError: If *timestamp* is not a ``datetime`` or ``int``.
         ValueError: If a ``datetime`` is naive (no tzinfo), or the resulting
             epoch milliseconds is negative or exceeds MAX_TIMESTAMP.
     """
-    if isinstance(timestamp, bool):
-        raise TypeError(
-            "timestamp must be a datetime or int, got bool"
-        )
     if isinstance(timestamp, datetime):
         if timestamp.tzinfo is None:
             raise ValueError("timestamp must be timezone-aware")
