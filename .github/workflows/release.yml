@@ -394,8 +394,6 @@ jobs:
   publish-crates:
     needs: prepare
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v6
         with:
@@ -420,7 +418,7 @@ jobs:
 
       - name: Authenticate with crates.io
         if: steps.check.outputs.already_published == 'false'
-        uses: rust-lang/crates-io-auth-action@v1
+        uses: rust-lang/crates-io-auth-action@v1.0.4
         id: crates-auth
 
       - name: Publish to crates.io
