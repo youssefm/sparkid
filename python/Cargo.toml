@@ -1,0 +1,13 @@
+[package]
+name = "sparkid-python"
+version = "2.0.1"
+edition = "2021"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+path = "rust/lib.rs"
+
+[dependencies]
+sparkid = { path = "../rust" }
+pyo3 = { version = "0.25", features = ["extension-module"] }
