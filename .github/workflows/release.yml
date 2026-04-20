@@ -197,11 +197,34 @@ jobs:
           npm publish --access public
           echo "### ✅ Published sparkid@${{ needs.prepare.outputs.new_version }} to npm" >> "$GITHUB_STEP_SUMMARY"
 
+  # ── Check if PyPI version already exists (skip builds if so) ────
+  check-pypi:
+    needs: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      already_published: ${{ steps.check.outputs.already_published }}
+    steps:
+      - name: Check if version already published to PyPI
+        id: check
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          http_code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/sparkid/$NEW_VERSION/json")
+          if [ "$http_code" = "200" ]; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "⏭️ sparkid $NEW_VERSION already exists on PyPI — skipping wheel builds"
+            echo "### ⏭️ PyPI: already published — skipping builds" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+            echo "📦 sparkid $NEW_VERSION not found on PyPI (HTTP $http_code) — will build and publish"
+          fi
+
   # ── Build Python wheels (parallel, multi-platform) ──────────────
 
   # Linux glibc (manylinux)
   build-python-linux:
-    needs: prepare
+    needs: [prepare, check-pypi]
+    if: needs.check-pypi.outputs.already_published == 'false'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -228,7 +251,8 @@ jobs:
 
   # Linux musl (Alpine, distroless)
   build-python-musllinux:
-    needs: prepare
+    needs: [prepare, check-pypi]
+    if: needs.check-pypi.outputs.already_published == 'false'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -259,7 +283,8 @@ jobs:
 
   # macOS
   build-python-macos:
-    needs: prepare
+    needs: [prepare, check-pypi]
+    if: needs.check-pypi.outputs.already_published == 'false'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
@@ -289,7 +314,8 @@ jobs:
 
   # Windows
   build-python-windows:
-    needs: prepare
+    needs: [prepare, check-pypi]
+    if: needs.check-pypi.outputs.already_published == 'false'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -325,7 +351,8 @@ jobs:
 
   # Source distribution
   build-python-sdist:
-    needs: prepare
+    needs: [prepare, check-pypi]
+    if: needs.check-pypi.outputs.already_published == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -344,7 +371,8 @@ jobs:
 
   # ── Publish to PyPI (after wheels are built) ───────────────────
   publish-pypi:
-    needs: [prepare, build-python-linux, build-python-musllinux, build-python-macos, build-python-windows, build-python-sdist]
+    needs: [prepare, check-pypi, build-python-linux, build-python-musllinux, build-python-macos, build-python-windows, build-python-sdist]
+    if: needs.check-pypi.outputs.already_published == 'false'
     runs-on: ubuntu-latest
     steps:
       - uses: astral-sh/setup-uv@v8.0.0
@@ -357,23 +385,7 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Check if version already published to PyPI
-        id: check
-        env:
-          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
-        run: |
-          http_code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/sparkid/$NEW_VERSION/json")
-          if [ "$http_code" = "200" ]; then
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            echo "⏭️ sparkid $NEW_VERSION already exists on PyPI — skipping publish"
-            echo "### ⏭️ PyPI: already published" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-            echo "📦 sparkid $NEW_VERSION not found on PyPI (HTTP $http_code) — will publish"
-          fi
-
       - name: Publish to PyPI
-        if: steps.check.outputs.already_published == 'false'
         run: |
           uv publish dist/*
           echo "### ✅ Published sparkid ${{ needs.prepare.outputs.new_version }} to PyPI" >> "$GITHUB_STEP_SUMMARY"
@@ -423,6 +435,7 @@ jobs:
   # ── Create GitHub Release (after all publishes succeed) ────────
   create-release:
     needs: [publish-npm, publish-pypi, publish-crates, prepare]
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
