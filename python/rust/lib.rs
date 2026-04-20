@@ -1,16 +1,34 @@
-use std::cell::RefCell;
+use std::cell::UnsafeCell;
 use std::str::FromStr;
 
+use pyo3::ffi;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
 
 use sparkid::{IdGenerator, SparkId};
 
+const ID_LENGTH: isize = 21;
+const ID_LENGTH_USIZE: usize = 21;
+
+/// Allocate a CPython ASCII string and write the SparkId directly into it.
+///
+/// Uses `PyUnicode_New(21, 127)` for a compact ASCII string, then calls
+/// `SparkId::encode_utf8` to fill the buffer in place — no intermediate
+/// `SparkIdStr` copy, no UTF-8 decode.
+#[inline(always)]
+unsafe fn sparkid_to_pystring<'py>(py: Python<'py>, id: SparkId) -> Bound<'py, PyString> {
+    let ptr = ffi::PyUnicode_New(ID_LENGTH, 127);
+    debug_assert!(!ptr.is_null());
+    let data = ffi::PyUnicode_DATA(ptr) as *mut [u8; ID_LENGTH_USIZE];
+    id.encode_utf8(&mut *data);
+    Bound::from_owned_ptr(py, ptr).downcast_into_unchecked()
+}
+
 /// Maximum encodable timestamp: 58^8 - 1
 const MAX_TIMESTAMP: u64 = 128_063_081_718_015;
 
 thread_local! {
-    static LOCAL_GEN: RefCell<IdGenerator> = RefCell::new(IdGenerator::new());
+    static LOCAL_GEN: UnsafeCell<IdGenerator> = UnsafeCell::new(IdGenerator::new());
 }
 
 /// Validate timestamp range before passing to Rust (which would panic).
@@ -41,15 +59,13 @@ impl PyIdGenerator {
 
     fn generate<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyString> {
         let id = self.inner.next_id();
-        let id_str = id.as_str();
-        PyString::new(py, &*id_str)
+        unsafe { sparkid_to_pystring(py, id) }
     }
 
     fn generate_at<'py>(&mut self, py: Python<'py>, timestamp_ms: i64) -> PyResult<Bound<'py, PyString>> {
         let ts = validate_timestamp(timestamp_ms)?;
         let id = self.inner.next_id_at(ts);
-        let id_str = id.as_str();
-        Ok(PyString::new(py, &*id_str))
+        Ok(unsafe { sparkid_to_pystring(py, id) })
     }
 
     fn reset(&mut self) {
@@ -60,9 +76,10 @@ impl PyIdGenerator {
 #[pyfunction]
 fn generate_id(py: Python<'_>) -> Bound<'_, PyString> {
     LOCAL_GEN.with(|gen| {
-        let id = gen.borrow_mut().next_id();
-        let id_str = id.as_str();
-        PyString::new(py, &*id_str)
+        // SAFETY: thread_local guarantees single-thread access; no re-entrant calls.
+        let gen = unsafe { &mut *gen.get() };
+        let id = gen.next_id();
+        unsafe { sparkid_to_pystring(py, id) }
     })
 }
 
@@ -70,9 +87,10 @@ fn generate_id(py: Python<'_>) -> Bound<'_, PyString> {
 fn generate_id_at(py: Python<'_>, timestamp_ms: i64) -> PyResult<Bound<'_, PyString>> {
     let ts = validate_timestamp(timestamp_ms)?;
     LOCAL_GEN.with(|gen| {
-        let id = gen.borrow_mut().next_id_at(ts);
-        let id_str = id.as_str();
-        Ok(PyString::new(py, &*id_str))
+        // SAFETY: thread_local guarantees single-thread access; no re-entrant calls.
+        let gen = unsafe { &mut *gen.get() };
+        let id = gen.next_id_at(ts);
+        Ok(unsafe { sparkid_to_pystring(py, id) })
     })
 }
 
@@ -106,14 +124,15 @@ fn from_bytes<'py>(py: Python<'py>, data: &[u8]) -> PyResult<Bound<'py, PyString
     let spark_id = SparkId::from_bytes(arr).map_err(|e| {
         pyo3::exceptions::PyValueError::new_err(e.to_string())
     })?;
-    let id_str = spark_id.as_str();
-    Ok(PyString::new(py, &*id_str))
+    Ok(unsafe { sparkid_to_pystring(py, spark_id) })
 }
 
 #[pyfunction]
 fn reset_thread_local() {
     LOCAL_GEN.with(|gen| {
-        *gen.borrow_mut() = IdGenerator::new();
+        // SAFETY: thread_local guarantees single-thread access; no re-entrant calls.
+        let gen = unsafe { &mut *gen.get() };
+        *gen = IdGenerator::new();
     });
 }
 

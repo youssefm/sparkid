@@ -53,7 +53,7 @@ const MAX_TIMESTAMP: u64 = BASE.pow(TIMESTAMP_CHAR_COUNT as u32) - 1; // 128_063
 const COUNTER_HEAD_CHAR_COUNT: usize = COUNTER_CHAR_COUNT - 1;
 
 // Forward-lookup table padded to 64 entries so that `index & 0x3F` (0-63) is
-// always in bounds. Lets the compiler eliminate bounds checks in `from_packed`.
+// always in bounds. Lets the compiler eliminate bounds checks in `encode_utf8`.
 // Indices 58-63 map to 0 and are never accessed for valid SparkIds.
 const ALPHABET_LOOKUP: [u8; 64] = {
     let mut table = [0u8; 64];
@@ -288,7 +288,27 @@ impl SparkId {
     /// Base58 string representation.
     #[inline]
     pub fn as_str(&self) -> SparkIdStr {
-        SparkIdStr::from_packed(self.0)
+        let mut out = [0u8; ID_LENGTH];
+        self.encode_utf8(&mut out);
+        SparkIdStr(out)
+    }
+
+    /// Writes the 21-char Base58 string representation into `buffer`.
+    ///
+    /// This is the low-level building block for [`as_str`](Self::as_str)
+    /// and [`Display`](core::fmt::Display). Callers that need to write
+    /// into an externally owned buffer (e.g. an FFI-allocated string)
+    /// can use this to avoid the intermediate [`SparkIdStr`] copy.
+    #[inline]
+    pub fn encode_utf8(&self, buffer: &mut [u8; ID_LENGTH]) {
+        let value = self.0;
+        let mut shift = 122i32;
+        let mut i = 0;
+        while i < ID_LENGTH {
+            buffer[i] = ALPHABET_LOOKUP[((value >> shift as u32) & 0x3F) as usize];
+            shift -= 6;
+            i += 1;
+        }
     }
 
     /// Returns the embedded timestamp as milliseconds since the Unix epoch.
@@ -341,22 +361,9 @@ impl SparkId {
 // ---------------------------------------------------------------------------
 
 impl SparkIdStr {
-    #[inline]
-    pub(crate) fn from_packed(value: u128) -> Self {
-        let mut out = [0u8; ID_LENGTH];
-        let mut shift = 122i32; // first index at bits 127..122
-        let mut i = 0;
-        while i < 21 {
-            out[i] = ALPHABET_LOOKUP[((value >> shift as u32) & 0x3F) as usize];
-            shift -= 6;
-            i += 1;
-        }
-        Self(out)
-    }
-
     fn as_str_inner(&self) -> &str {
-        // SAFETY: from_packed only produces bytes from ALPHABET, which are ASCII
-        // and therefore always valid UTF-8. Skips the redundant validation scan.
+        // SAFETY: encode_utf8 only produces bytes from ALPHABET, which are
+        // ASCII and therefore always valid UTF-8. Skips the redundant validation.
         unsafe { core::str::from_utf8_unchecked(&self.0) }
     }
 }

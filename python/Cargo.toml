@@ -11,3 +11,6 @@ path = "rust/lib.rs"
 [dependencies]
 sparkid = { path = "../rust" }
 pyo3 = { version = "0.25", features = ["extension-module"] }
+
+[profile.release]
+codegen-units = 1
