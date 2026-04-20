@@ -44,9 +44,27 @@ jobs:
         working-directory: python
       - run: uvx ruff check src/ tests/
         working-directory: python
+        if: matrix.python-version == '3.14'
       - run: uvx mypy src/
         working-directory: python
         if: matrix.python-version == '3.14'
+      - run: uv run pytest tests/
+        working-directory: python
+
+  python-platform:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v8.0.0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+      - run: uv sync --group test
+        working-directory: python
       - run: uv run pytest tests/
         working-directory: python
 
