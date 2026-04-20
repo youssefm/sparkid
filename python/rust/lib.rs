@@ -125,7 +125,7 @@ fn reset_thread_local() {
 }
 
 #[pymodule]
-fn _sparkid(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIdGenerator>()?;
     m.add_function(wrap_pyfunction!(generate_id, m)?)?;
     m.add_function(wrap_pyfunction!(generate_id_at, m)?)?;

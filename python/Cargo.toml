@@ -4,7 +4,7 @@ version = "2.0.1"
 edition = "2021"
 
 [lib]
-name = "_sparkid"
+name = "_native"
 crate-type = ["cdylib"]
 path = "rust/lib.rs"
 
