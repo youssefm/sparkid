@@ -511,6 +511,7 @@ class TestThreadSafety:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="os.fork not available")
 class TestForkSafety:
     def test_generators_tracked_in_weakset(self):
         gen = IdGenerator()
