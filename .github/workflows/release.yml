@@ -221,7 +221,7 @@ jobs:
           manylinux: auto
           sccache: "true"
           working-directory: python
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: wheels-linux-${{ matrix.target }}
           path: python/dist
@@ -252,7 +252,7 @@ jobs:
           manylinux: musllinux_1_2
           sccache: "true"
           working-directory: python
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: wheels-musllinux-${{ matrix.target }}
           path: python/dist
@@ -282,7 +282,7 @@ jobs:
           target: universal2-apple-darwin
           args: --release --out dist -i 3.9 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11
           working-directory: python
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: wheels-macos
           path: python/dist
@@ -318,7 +318,7 @@ jobs:
           args: --release --out dist -i ${{ matrix.interpreter }}
           sccache: "true"
           working-directory: python
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: wheels-windows-${{ matrix.target }}
           path: python/dist
@@ -337,7 +337,7 @@ jobs:
           command: sdist
           args: --out dist
           working-directory: python
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         with:
           name: wheels-sdist
           path: python/dist
@@ -348,8 +348,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: astral-sh/setup-uv@v8.0.0
+        with:
+          enable-cache: false
 
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v6
         with:
           pattern: wheels-*
           merge-multiple: true
@@ -380,6 +382,8 @@ jobs:
   publish-crates:
     needs: prepare
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v6
         with:
@@ -392,16 +396,14 @@ jobs:
         env:
           NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
         run: |
-          # Query crates.io API for this specific version
-          version_exists=$(curl -s "https://crates.io/api/v1/crates/sparkid/$NEW_VERSION" \
-            | jq -r '.version.num // empty')
-          if [ "$version_exists" = "$NEW_VERSION" ]; then
+          http_code=$(curl -s -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/sparkid/$NEW_VERSION")
+          if [ "$http_code" = "200" ]; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
             echo "⏭️ sparkid $NEW_VERSION already exists on crates.io — skipping publish"
             echo "### ⏭️ crates.io: already published" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "already_published=false" >> "$GITHUB_OUTPUT"
-            echo "📦 sparkid $NEW_VERSION not found on crates.io — will publish"
+            echo "📦 sparkid $NEW_VERSION not found on crates.io (HTTP $http_code) — will publish"
           fi
 
       - name: Authenticate with crates.io
