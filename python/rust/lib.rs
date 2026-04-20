@@ -9,13 +9,6 @@ use sparkid::{IdGenerator, SparkId};
 /// Maximum encodable timestamp: 58^8 - 1
 const MAX_TIMESTAMP: u64 = 128_063_081_718_015;
 
-const ALPHABET: &str = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-const BASE: u64 = 58;
-const ID_LENGTH: usize = 21;
-const TIMESTAMP_CHAR_COUNT: usize = 8;
-const COUNTER_CHAR_COUNT: usize = 6;
-const RANDOM_CHAR_COUNT: usize = 7;
-
 thread_local! {
     static LOCAL_GEN: RefCell<IdGenerator> = RefCell::new(IdGenerator::new());
 }
@@ -133,12 +126,5 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(to_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(from_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(reset_thread_local, m)?)?;
-    m.add("ALPHABET", ALPHABET)?;
-    m.add("BASE", BASE)?;
-    m.add("MAX_TIMESTAMP", MAX_TIMESTAMP)?;
-    m.add("ID_LENGTH", ID_LENGTH)?;
-    m.add("TIMESTAMP_CHAR_COUNT", TIMESTAMP_CHAR_COUNT)?;
-    m.add("COUNTER_CHAR_COUNT", COUNTER_CHAR_COUNT)?;
-    m.add("RANDOM_CHAR_COUNT", RANDOM_CHAR_COUNT)?;
     Ok(())
 }
