@@ -13,10 +13,4 @@ def to_bytes(id: str) -> bytes: ...
 def from_bytes(data: bytes) -> str: ...
 def reset_thread_local() -> None: ...
 
-ALPHABET: str
-BASE: int
 MAX_TIMESTAMP: int
-ID_LENGTH: int
-TIMESTAMP_CHAR_COUNT: int
-COUNTER_CHAR_COUNT: int
-RANDOM_CHAR_COUNT: int
