@@ -17,11 +17,6 @@ from sparkid._native import (  # isort: skip
 # Track all live generators for fork-safety reset.
 _all_generators: weakref.WeakSet["IdGenerator"] = weakref.WeakSet()
 
-# Re-export constants used by tests
-ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-BASE = 58
-
-
 class IdGenerator:
     """Generates 21-char, Base58, time-sortable, collision-resistant unique IDs.
 

@@ -9,8 +9,6 @@ from datetime import datetime, timezone
 import pytest
 
 from sparkid import (
-    ALPHABET,
-    BASE,
     IdGenerator,
     _after_fork_in_child,
     _all_generators,
@@ -20,7 +18,7 @@ from sparkid import (
     generate_id_at,
     to_bytes,
 )
-from sparkid._constants import MAX_TIMESTAMP
+from sparkid._constants import ALPHABET, BASE, MAX_TIMESTAMP
 
 VALID_CHARS = frozenset(ALPHABET)
 
