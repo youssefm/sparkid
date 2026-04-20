@@ -408,7 +408,7 @@ jobs:
         env:
           NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
         run: |
-          http_code=$(curl -s -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/sparkid/$NEW_VERSION")
+          http_code=$(curl -s -o /dev/null -w '%{http_code}' -H 'User-Agent: sparkid-release-ci (github.com/youssefm/sparkid)' "https://crates.io/api/v1/crates/sparkid/$NEW_VERSION")
           if [ "$http_code" = "200" ]; then
             echo "already_published=true" >> "$GITHUB_OUTPUT"
             echo "⏭️ sparkid $NEW_VERSION already exists on crates.io — skipping publish"
