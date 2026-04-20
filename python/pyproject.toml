@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "sparkid"
-version = "2.1.0"
+version = "2.1.1"
 description = "Fast, time-sortable, 21-char Base58 unique ID generator"
 readme = "README.md"
 license = "MIT"
