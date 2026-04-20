@@ -173,12 +173,6 @@ let mut gen = sparkid::IdGenerator::new();
 let ids: Vec<sparkid::SparkId> = gen.take(100).collect();
 ```
 
-## Performance
-
-```bash
-cargo bench
-```
-
 ## License
 
 MIT

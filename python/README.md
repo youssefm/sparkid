@@ -105,12 +105,6 @@ id = gen()
 
 Each `IdGenerator` instance maintains its own internal state. The module-level `generate_id()` function uses `threading.local` to automatically create one instance per thread.
 
-## Performance
-
-```bash
-python bench/benchmark.py
-```
-
 ## License
 
 MIT
