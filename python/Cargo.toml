@@ -10,7 +10,10 @@ path = "rust/lib.rs"
 
 [dependencies]
 sparkid = { path = "../rust" }
-pyo3 = { version = "0.25", features = ["extension-module"] }
+pyo3 = { version = "0.25", features = ["extension-module", "generate-import-lib"] }
+
+[build-dependencies]
+pyo3-build-config = { version = "0.25", features = ["resolve-config"] }
 
 [profile.release]
 codegen-units = 1
