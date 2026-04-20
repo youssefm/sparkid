@@ -50,3 +50,7 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["sparkid"]
+combine-as-imports = true

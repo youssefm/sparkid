@@ -4,7 +4,7 @@ import os
 import weakref
 from datetime import datetime, timezone
 
-from sparkid._native import (  # isort: skip
+from sparkid._native import (
     IdGenerator as _RustIdGenerator,
     extract_timestamp_ms as _extract_timestamp_ms,
     from_bytes,
