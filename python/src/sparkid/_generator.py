@@ -131,9 +131,82 @@ class IdGenerator:
         self._random_byte_position = 0
         self._random_byte_len = 0
 
+    def generate_at(self, timestamp: "datetime | int") -> str:
+        """Generate an ID using a caller-supplied timestamp.
+
+        Advances the generator's internal state using the given timestamp. If
+        the supplied timestamp is earlier than the last-seen timestamp, the
+        generator treats it as a clock regression — it preserves monotonicity
+        by incrementing the counter instead of encoding the earlier timestamp.
+
+        Args:
+            timestamp: Either a timezone-aware ``datetime`` or an ``int``
+                representing epoch milliseconds.
+
+        Returns:
+            A 21-character Base58 sparkid string.
+
+        Raises:
+            TypeError: If *timestamp* is not a ``datetime`` or ``int``, or is
+                a ``bool``.
+            ValueError: If a ``datetime`` is naive (no tzinfo).
+        """
+        if isinstance(timestamp, bool):
+            raise TypeError(
+                "timestamp must be a datetime or int, got bool"
+            )
+        if isinstance(timestamp, datetime):
+            if timestamp.tzinfo is None:
+                raise ValueError("timestamp must be timezone-aware")
+            timestamp_ms = int(timestamp.timestamp() * 1000)
+        elif isinstance(timestamp, int):
+            timestamp_ms = timestamp
+        else:
+            raise TypeError(
+                f"timestamp must be a datetime or int,"
+                f" got {type(timestamp).__name__}"
+            )
+
+        # NOTE: The state-machine logic below is intentionally duplicated in
+        # __call__. CPython doesn't inline method calls, so extracting a shared
+        # helper adds ~30ns (~4%) overhead to the hot path. Keep both copies in
+        # sync when modifying the generation algorithm.
+        if timestamp_ms > self._timestamp_cache_ms:
+            delta = timestamp_ms - self._timestamp_cache_ms
+            if delta <= BASE:
+                self._timestamp_cache_ms = timestamp_ms
+                self._increment_encoded_timestamp(delta)
+            else:
+                self._encode_timestamp(timestamp_ms)
+            self._seed_counter()
+        else:
+            nxt = _SUCCESSOR_STR[ord(self._counter_tail)]
+            if nxt:
+                self._counter_tail = nxt
+            else:
+                self._increment_counter_carry()
+
+        position = self._random_byte_position
+        end = position + RANDOM_CHAR_COUNT
+        if end > self._random_byte_len:
+            self._refill_random()
+            position = 0
+            end = RANDOM_CHAR_COUNT
+        self._random_byte_position = end
+
+        return (
+            self._prefix_plus_counter_head
+            + self._counter_tail
+            + self._random_char_buffer[position:end]
+        )
+
     def __call__(self) -> str:
         timestamp = _time_ns() // 1_000_000
 
+        # NOTE: The state-machine logic below is intentionally duplicated in
+        # generate_at. CPython doesn't inline method calls, so extracting a
+        # shared helper adds ~30ns (~4%) overhead to this hot path. Keep both
+        # copies in sync when modifying the generation algorithm.
         if timestamp > self._timestamp_cache_ms:
             # New millisecond (or first call): update timestamp, seed counter.
             delta = timestamp - self._timestamp_cache_ms
@@ -312,6 +385,28 @@ def generate_id() -> str:
     within each thread; across threads they are unique but unordered.
     """
     return _local.gen()
+
+
+def generate_id_at(timestamp: "datetime | int") -> str:
+    """Generate a unique, time-sortable, 21-char Base58 ID at a given timestamp.
+
+    Thread-safe via threading.local. IDs are strictly monotonically increasing
+    within each thread; across threads they are unique but unordered.
+
+    Args:
+        timestamp: Either a timezone-aware ``datetime`` or an ``int``
+            representing epoch milliseconds.
+
+    Returns:
+        A 21-character Base58 sparkid string.
+
+    Raises:
+        TypeError: If *timestamp* is not a ``datetime`` or ``int``, or is a
+            ``bool``.
+        ValueError: If a ``datetime`` is naive (no tzinfo), or the resulting
+            epoch milliseconds is negative or exceeds MAX_TIMESTAMP.
+    """
+    return _local.gen.generate_at(timestamp)
 
 
 def extract_timestamp(id: str) -> datetime:

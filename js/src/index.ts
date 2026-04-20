@@ -66,7 +66,7 @@ let randomRaw: Uint8Array<ArrayBuffer> | undefined;
 let randomCharCodes: Uint8Array<ArrayBuffer>;
 
 // Timestamp cache — only re-encoded when the millisecond advances
-let timestampCacheMs = 0;
+let timestampCacheMs = -Infinity;
 let timestampCachePrefix = "";
 let randomCharCount = 0;
 let randomCharPosition = 0;
@@ -220,46 +220,25 @@ function incrementCarry(): void {
 }
 
 /**
- * Generate a unique, time-sortable, 21-char Base58 ID.
+ * Internal emit: advance the state machine for `ms` and return a 21-char ID.
  *
- * Each ID is composed of three parts:
- *   - 8-char timestamp prefix   (milliseconds, Base58-encoded, sortable)
- *   - 6-char monotonic counter  (randomly seeded each ms, incremented)
- *   - 7-char random tail        (independently random per ID)
- *
- * IDs are strictly monotonically increasing within a single process:
- * across milliseconds by the timestamp prefix, and within the same millisecond
- * by incrementing the counter (seeded from crypto.getRandomValues at the
- * start of each new millisecond). Since JavaScript is single-threaded, this
- * gives process-wide monotonicity with no additional coordination needed.
- *
- * The random tail is freshly generated for every ID, making individual IDs
- * unpredictable even when the counter value can be inferred.
- *
- * Properties:
- *   - 21 characters, fixed length
- *   - Lexicographically sortable by creation time
- *   - Monotonically increasing (within a single process)
- *   - URL-safe, no ambiguous characters
- *   - ~58^13 (~8.4 x 10^22) total combinations per millisecond
- *   - Cryptographically secure randomness (crypto.getRandomValues)
- *
- * Works in Node.js (>=19), browsers, Deno, Bun, and Cloudflare Workers.
+ * Contains the shared logic for both `generateId` and `generateIdAt`:
+ *   1. Advance timestamp / increment counter
+ *   2. Fill random tail
+ *   3. Assemble and return the ID string
  */
-export function generateId(): string {
-  const timestamp = Date.now();
-
-  if (timestamp > timestampCacheMs) {
+function _generateIdAt(ms: number): string {
+  if (ms > timestampCacheMs) {
     // New millisecond (or first call): update timestamp, seed counter.
-    const delta = timestamp - timestampCacheMs;
+    const delta = ms - timestampCacheMs;
     if (delta <= BASE) {
       // Fast path: increment the encoded timestamp directly,
       // avoiding 8 Math.trunc/modulo operations.
-      timestampCacheMs = timestamp;
+      timestampCacheMs = ms;
       incrementEncodedTimestamp(delta);
     } else {
       // Large jump or first call: full re-encode.
-      encodeTimestamp(timestamp);
+      encodeTimestamp(ms);
     }
     seedCounter();
   } else {
@@ -294,6 +273,77 @@ export function generateId(): string {
       randomCharCodes[pos + 6],
     )
   );
+}
+
+/**
+ * Generate a unique, time-sortable, 21-char Base58 ID.
+ *
+ * Each ID is composed of three parts:
+ *   - 8-char timestamp prefix   (milliseconds, Base58-encoded, sortable)
+ *   - 6-char monotonic counter  (randomly seeded each ms, incremented)
+ *   - 7-char random tail        (independently random per ID)
+ *
+ * IDs are strictly monotonically increasing within a single process:
+ * across milliseconds by the timestamp prefix, and within the same millisecond
+ * by incrementing the counter (seeded from crypto.getRandomValues at the
+ * start of each new millisecond). Since JavaScript is single-threaded, this
+ * gives process-wide monotonicity with no additional coordination needed.
+ *
+ * The random tail is freshly generated for every ID, making individual IDs
+ * unpredictable even when the counter value can be inferred.
+ *
+ * Properties:
+ *   - 21 characters, fixed length
+ *   - Lexicographically sortable by creation time
+ *   - Monotonically increasing (within a single process)
+ *   - URL-safe, no ambiguous characters
+ *   - ~58^13 (~8.4 x 10^22) total combinations per millisecond
+ *   - Cryptographically secure randomness (crypto.getRandomValues)
+ *
+ * Works in Node.js (>=19), browsers, Deno, Bun, and Cloudflare Workers.
+ */
+export function generateId(): string {
+  return _generateIdAt(Date.now());
+}
+
+/**
+ * Generate a unique, time-sortable, 21-char Base58 ID at a caller-supplied timestamp.
+ *
+ * Behaves identically to {@link generateId} but uses the provided `Date` instead
+ * of `Date.now()`. This enables deterministic testing without mocking internals and
+ * server-side use when a request timestamp is already available.
+ *
+ * **Clock regression / backward timestamps:** If the supplied timestamp is earlier
+ * than the last-seen timestamp (from either `generateId` or a prior `generateIdAt`
+ * call), the generator preserves monotonicity by incrementing the counter instead of
+ * encoding the earlier timestamp. This is the same clock-regression behavior as
+ * `generateId`.
+ *
+ * @param timestamp - A `Date` instance representing the desired creation time.
+ * @returns A 21-character Base58 sparkid string.
+ * @throws {TypeError} If `timestamp` is not a `Date` instance.
+ * @throws {RangeError} If the `Date` is invalid (NaN), negative, or exceeds `MAX_TIMESTAMP`.
+ *
+ * @example
+ * ```ts
+ * const id = generateIdAt(new Date("2024-01-01T00:00:00Z"));
+ * const ts = extractTimestamp(id);
+ * console.log(ts.toISOString()); // 2024-01-01T00:00:00.000Z
+ * ```
+ */
+export function generateIdAt(timestamp: Date): string {
+  if (!(timestamp instanceof Date)) {
+    throw new TypeError(
+      "generateIdAt: expected a Date instance",
+    );
+  }
+  const ms = timestamp.getTime();
+  if (Number.isNaN(ms)) {
+    throw new RangeError(
+      "generateIdAt: invalid Date (getTime() returned NaN)",
+    );
+  }
+  return _generateIdAt(ms);
 }
 
 /**

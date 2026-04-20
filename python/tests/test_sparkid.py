@@ -4,9 +4,19 @@ import os
 import threading
 import time
 from collections import Counter
-from unittest.mock import patch
+from datetime import datetime, timezone
 
-from sparkid import IdGenerator, extract_timestamp, from_bytes, generate_id, to_bytes
+
+import pytest
+
+from sparkid import (
+    IdGenerator,
+    extract_timestamp,
+    from_bytes,
+    generate_id,
+    generate_id_at,
+    to_bytes,
+)
 from sparkid._constants import MAX_TIMESTAMP
 from sparkid._generator import (
     _FIRST_CHAR,
@@ -222,10 +232,8 @@ class TestCounterMonotonicity:
 
     def test_counter_increments_within_same_ms(self):
         gen = IdGenerator()
-        # Pin time to a fixed millisecond to guarantee all IDs share the same timestamp.
         fixed_ts = int(time.time() * 1000) + 100_000
-        with patch("sparkid._generator._time_ns", return_value=fixed_ts * 1_000_000):
-            ids = [gen() for _ in range(500)]
+        ids = [gen.generate_at(fixed_ts) for _ in range(500)]
         assert all(
             id_[:8] == ids[0][:8] for id_ in ids
         ), "all IDs should share timestamp"
@@ -382,12 +390,8 @@ class TestClockRegression:
         gen = IdGenerator()
         real_ts = int(time.time() * 1000)
 
-        with patch("sparkid._generator._time_ns", return_value=real_ts * 1_000_000):
-            id1 = gen()
-
-        backward_ts = (real_ts - 100) * 1_000_000
-        with patch("sparkid._generator._time_ns", return_value=backward_ts):
-            id2 = gen()
+        id1 = gen.generate_at(real_ts)
+        id2 = gen.generate_at(real_ts - 100)
 
         assert id2 > id1, "Monotonicity must be preserved when clock goes backward"
         assert id2[:8] == id1[:8]  # Timestamp unchanged, counter incremented
@@ -396,18 +400,9 @@ class TestClockRegression:
         gen = IdGenerator()
         real_ts = int(time.time() * 1000)
 
-        with patch("sparkid._generator._time_ns", return_value=real_ts * 1_000_000):
-            id1 = gen()
-
-        with patch(
-            "sparkid._generator._time_ns", return_value=(real_ts - 50) * 1_000_000
-        ):
-            id2 = gen()
-
-        with patch(
-            "sparkid._generator._time_ns", return_value=(real_ts + 50) * 1_000_000
-        ):
-            id3 = gen()
+        id1 = gen.generate_at(real_ts)
+        id2 = gen.generate_at(real_ts - 50)
+        id3 = gen.generate_at(real_ts + 50)
 
         assert id1 < id2 < id3
         assert id3[:8] > id1[:8]  # New timestamp prefix after catch-up
@@ -655,6 +650,7 @@ class TestPublicAPI:
         import sparkid
 
         assert hasattr(sparkid, "generate_id")
+        assert hasattr(sparkid, "generate_id_at")
         assert hasattr(sparkid, "extract_timestamp")
         assert hasattr(sparkid, "to_bytes")
         assert hasattr(sparkid, "from_bytes")
@@ -662,6 +658,7 @@ class TestPublicAPI:
         assert not hasattr(sparkid, "MAX_TIMESTAMP")
         assert sparkid.__all__ == [
             "generate_id",
+            "generate_id_at",
             "extract_timestamp",
             "to_bytes",
             "from_bytes",
@@ -838,3 +835,172 @@ class TestFromBytesValidation:
         binary[15] = binary[15] | 0x01  # set lowest bit
         with pytest.raises(ValueError):
             from_bytes(bytes(binary))
+
+
+# ---------------------------------------------------------------------------
+# generate_id_at / IdGenerator.generate_at
+# ---------------------------------------------------------------------------
+
+
+class TestGenerateAt:
+    def test_valid_format_length(self):
+        gen = IdGenerator()
+        ts = int(time.time() * 1000)
+        for _ in range(100):
+            id_ = gen.generate_at(ts)
+            assert len(id_) == 21
+
+    def test_valid_format_charset(self):
+        gen = IdGenerator()
+        ts = int(time.time() * 1000)
+        for _ in range(100):
+            id_ = gen.generate_at(ts)
+            assert set(id_) <= VALID_CHARS
+
+    def test_timestamp_encoding_int(self):
+        gen = IdGenerator()
+        ts = int(time.time() * 1000)
+        id_ = gen.generate_at(ts)
+        decoded = _decode_timestamp(id_[:8])
+        assert decoded == ts
+
+    def test_timestamp_encoding_datetime(self):
+        gen = IdGenerator()
+        dt = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        expected_ms = int(dt.timestamp() * 1000)
+        id_ = gen.generate_at(dt)
+        decoded = _decode_timestamp(id_[:8])
+        assert decoded == expected_ms
+
+    def test_monotonicity_same_ms(self):
+        gen = IdGenerator()
+        ts = int(time.time() * 1000)
+        ids = [gen.generate_at(ts) for _ in range(100)]
+        for i in range(1, len(ids)):
+            assert ids[i] > ids[i - 1]
+
+    def test_monotonicity_across_ms(self):
+        gen = IdGenerator()
+        ts = int(time.time() * 1000)
+        ids = [gen.generate_at(ts + i) for i in range(100)]
+        for i in range(1, len(ids)):
+            assert ids[i] > ids[i - 1]
+
+    def test_clock_regression_preserves_monotonicity(self):
+        gen = IdGenerator()
+        ts = int(time.time() * 1000)
+        id_future = gen.generate_at(ts + 1000)
+        id_past = gen.generate_at(ts)  # earlier timestamp
+        assert id_past > id_future  # still monotonically increasing
+
+    def test_datetime_timezone_aware(self):
+        gen = IdGenerator()
+        dt = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        id_ = gen.generate_at(dt)
+        assert len(id_) == 21
+        decoded_ms = _decode_timestamp(id_[:8])
+        assert decoded_ms == int(dt.timestamp() * 1000)
+
+    def test_datetime_naive_raises_valueerror(self):
+        gen = IdGenerator()
+        dt = datetime(2024, 1, 1, 0, 0, 0)  # naive
+        with pytest.raises(ValueError, match="timezone-aware"):
+            gen.generate_at(dt)
+
+    def test_int_input_works(self):
+        gen = IdGenerator()
+        ts = 1_700_000_000_000
+        id_ = gen.generate_at(ts)
+        assert len(id_) == 21
+        decoded = _decode_timestamp(id_[:8])
+        assert decoded == ts
+
+    def test_bool_raises_typeerror(self):
+        gen = IdGenerator()
+        with pytest.raises(TypeError):
+            gen.generate_at(True)
+        with pytest.raises(TypeError):
+            gen.generate_at(False)
+
+    def test_float_raises_typeerror(self):
+        gen = IdGenerator()
+        with pytest.raises(TypeError):
+            gen.generate_at(1.5)
+
+    def test_str_raises_typeerror(self):
+        gen = IdGenerator()
+        with pytest.raises(TypeError):
+            gen.generate_at("123")
+
+    def test_negative_int_is_clock_regression(self):
+        gen = IdGenerator()
+        before = gen.generate_at(1_000_000)
+        result = gen.generate_at(-1)
+        assert len(result) == 21
+        assert result > before, "monotonicity preserved despite negative timestamp"
+
+    def test_exceeds_max_timestamp_raises_valueerror(self):
+        gen = IdGenerator()
+        with pytest.raises(ValueError):
+            gen.generate_at(MAX_TIMESTAMP + 1)
+
+    def test_max_timestamp_succeeds(self):
+        gen = IdGenerator()
+        id_ = gen.generate_at(MAX_TIMESTAMP)
+        assert len(id_) == 21
+
+    def test_zero_timestamp_succeeds(self):
+        gen = IdGenerator()
+        id_ = gen.generate_at(0)
+        assert len(id_) == 21
+        decoded = _decode_timestamp(id_[:8])
+        assert decoded == 0
+
+
+class TestGenerateIdAtModuleLevel:
+    def test_valid_format(self):
+        ts = int(time.time() * 1000)
+        id_ = generate_id_at(ts)
+        assert len(id_) == 21
+        assert set(id_) <= VALID_CHARS
+
+    def test_interaction_generate_id_at_then_generate_id(self):
+        """generate_id_at and generate_id share thread-local generator."""
+        ts = int(time.time() * 1000) + 5000  # future timestamp
+        id_at = generate_id_at(ts)
+        id_normal = generate_id()
+        assert id_normal > id_at
+
+    def test_interaction_generate_id_then_generate_id_at(self):
+        """generate_id then generate_id_at share thread-local state."""
+        id_normal = generate_id()
+        # Use same ms or earlier — should still be monotonic
+        ts = int(time.time() * 1000)
+        id_at = generate_id_at(ts)
+        assert id_at > id_normal
+
+    def test_thread_local_isolation(self):
+        """generate_id_at uses per-thread generators."""
+        ts = int(time.time() * 1000)
+        results = {}
+
+        def worker(name):
+            ids = [generate_id_at(ts) for _ in range(10)]
+            results[name] = ids
+
+        t1 = threading.Thread(target=worker, args=("a",))
+        t2 = threading.Thread(target=worker, args=("b",))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        # Within each thread, IDs are monotonic
+        for name in ("a", "b"):
+            ids = results[name]
+            for i in range(1, len(ids)):
+                assert ids[i] > ids[i - 1]
+
+        # All IDs are unique across threads
+        all_ids = results["a"] + results["b"]
+        assert len(set(all_ids)) == len(all_ids)

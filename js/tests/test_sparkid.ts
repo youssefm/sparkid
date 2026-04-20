@@ -1,15 +1,28 @@
 // Comprehensive tests for the sparkid ID generator.
 // Uses Node.js built-in test runner (node:test) — zero dependencies.
 
-import { describe, it, mock, afterEach } from "node:test";
+import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { generateId, extractTimestamp } from "../src/index.ts";
+import { generateId, generateIdAt, extractTimestamp } from "../src/index.ts";
 import { MAX_TIMESTAMP } from "../src/constants.ts";
 import { toBytes, fromBytes } from "../src/binary.ts";
 
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 const BASE = ALPHABET.length; // 58
 const VALID_CHARS = new Set(ALPHABET);
+
+// ---------------------------------------------------------------------------
+// Boundary-value tests for generateIdAt (must run first — before state advances)
+// ---------------------------------------------------------------------------
+
+describe("generateIdAt boundary values", () => {
+  it("epoch zero (new Date(0)) succeeds and round-trips", () => {
+    const id = generateIdAt(new Date(0));
+    assert.equal(id.length, 21);
+    const extracted = extractTimestamp(id);
+    assert.equal(extracted.getTime(), 0);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Helper: decode a Base58-encoded timestamp prefix back to a number
@@ -522,12 +535,13 @@ describe("Public API", () => {
     assert.equal(typeof generateId(), "string");
   });
 
-  it("generateId and extractTimestamp are the named exports", async () => {
+  it("generateId, generateIdAt, and extractTimestamp are the named exports", async () => {
     const mod = await import("../src/index.ts");
     const exports = Object.keys(mod);
     assert.deepEqual(exports.sort(), [
       "extractTimestamp",
       "generateId",
+      "generateIdAt",
     ]);
   });
 
@@ -595,27 +609,122 @@ describe("extractTimestamp", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Timestamp validation
+// generateIdAt
 // ---------------------------------------------------------------------------
-// These tests MUST be last: they mock Date.now to MAX_TIMESTAMP, which
-// permanently advances the module-level timestampCacheMs. No tests should
-// run after this block.
 
-describe("Timestamp validation", () => {
-  afterEach(() => {
-    mock.restoreAll();
+describe("generateIdAt", () => {
+  it("produces valid 21-char Base58 IDs", () => {
+    const ts = new Date();
+    for (let i = 0; i < 100; i++) {
+      const id = generateIdAt(ts);
+      assert.equal(id.length, 21);
+      for (const ch of id) {
+        assert.ok(VALID_CHARS.has(ch), `invalid char '${ch}' in ${id}`);
+      }
+    }
   });
 
-  it("generateId() throws RangeError for timestamp above MAX_TIMESTAMP", () => {
-    // This test runs FIRST — throws before cache mutation, so cache stays at whatever it was
-    mock.method(Date, "now", () => MAX_TIMESTAMP + 1);
-    assert.throws(() => generateId(), RangeError);
+  it("encodes the provided timestamp correctly", () => {
+    const knownMs = 2100000000000; // far future, guaranteed to advance state
+    const ts = new Date(knownMs);
+    const id = generateIdAt(ts);
+    const decoded = decodeTimestamp(id.slice(0, 8));
+    assert.equal(decoded, knownMs);
   });
 
-  it("generateId() works at MAX_TIMESTAMP boundary", () => {
-    // Mock to MAX_TIMESTAMP (always > any real cached timestamp)
-    mock.method(Date, "now", () => MAX_TIMESTAMP);
-    const id = generateId();
-    assert.equal(id.substring(0, 8), "z".repeat(8));
+  it("monotonicity within same ms (multiple IDs with same Date)", () => {
+    const ts = new Date(2300000000000); // far future, advances state
+    const ids: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      ids.push(generateIdAt(ts));
+    }
+    for (let i = 1; i < ids.length; i++) {
+      assert.ok(ids[i] > ids[i - 1], `not monotonic at ${i}`);
+    }
+  });
+
+  it("monotonicity across increasing timestamps", () => {
+    const ids: string[] = [];
+    const baseMs = 2400000000000; // far future
+    for (let i = 0; i < 50; i++) {
+      ids.push(generateIdAt(new Date(baseMs + i * 10)));
+    }
+    for (let i = 1; i < ids.length; i++) {
+      assert.ok(ids[i] > ids[i - 1], `not monotonic at ${i}`);
+    }
+  });
+
+  it("clock regression: ID still increases when timestamp goes backward", () => {
+    const t1 = new Date(2600000000000); // advance state
+    const t0 = new Date(2500000000000); // earlier than t1
+    const idA = generateIdAt(t1);
+    const idB = generateIdAt(t0); // should still be > idA
+    assert.ok(idB > idA, `expected ${idB} > ${idA} despite backward timestamp`);
+  });
+
+  it("Date input works correctly", () => {
+    const knownMs = 2700000000000; // far future, guaranteed to advance state
+    const d = new Date(knownMs);
+    const id = generateIdAt(d);
+    const extracted = extractTimestamp(id);
+    assert.equal(extracted.getTime(), knownMs);
+  });
+
+  it("throws TypeError for non-Date input", () => {
+    assert.throws(() => generateIdAt(123 as any), TypeError);
+    assert.throws(() => generateIdAt("2024-01-01" as any), TypeError);
+    assert.throws(() => generateIdAt(null as any), TypeError);
+    assert.throws(() => generateIdAt(undefined as any), TypeError);
+    assert.throws(() => generateIdAt({} as any), TypeError);
+  });
+
+  it("throws RangeError for invalid Date (NaN)", () => {
+    assert.throws(() => generateIdAt(new Date(NaN)), RangeError);
+    assert.throws(() => generateIdAt(new Date("garbage")), RangeError);
+  });
+
+  it("throws RangeError for timestamp > MAX_TIMESTAMP", () => {
+    assert.throws(
+      () => generateIdAt(new Date(MAX_TIMESTAMP + 1)),
+      RangeError,
+    );
+  });
+
+  it("treats negative timestamp as clock regression", () => {
+    // A negative timestamp is in the past relative to any prior call,
+    // so the generator treats it as clock regression and increments the counter.
+    const before = generateIdAt(new Date(1_000_000));
+    const result = generateIdAt(new Date(-1));
+    assert.strictEqual(result.length, 21);
+    assert.ok(result > before, "monotonicity preserved despite negative timestamp");
+  });
+
+  it("interaction: generateIdAt then generateId maintains monotonicity", () => {
+    // Use a recent timestamp so generateId (which uses Date.now()) sees same-ms or later
+    const recent = new Date();
+    const idA = generateIdAt(recent);
+    const idB = generateId();
+    assert.ok(idB > idA, `expected generateId() > generateIdAt(): ${idB} > ${idA}`);
+  });
+
+  it("interaction: generateId then generateIdAt maintains monotonicity", () => {
+    const idA = generateId();
+    // Use same-ms timestamp — counter should increment
+    const now = new Date();
+    const idB = generateIdAt(now);
+    assert.ok(idB > idA, `expected generateIdAt() > generateId(): ${idB} > ${idA}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generateIdAt MAX_TIMESTAMP boundary (advances state — must be near end)
+// ---------------------------------------------------------------------------
+
+describe("generateIdAt MAX_TIMESTAMP boundary", () => {
+  it("MAX_TIMESTAMP succeeds and round-trips", () => {
+    const id = generateIdAt(new Date(MAX_TIMESTAMP));
+    assert.equal(id.length, 21);
+    const extracted = extractTimestamp(id);
+    assert.equal(extracted.getTime(), MAX_TIMESTAMP);
   });
 });
