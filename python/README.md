@@ -26,7 +26,7 @@ id = generate_id()
 ### Extract timestamp
 
 ```python
-from sparkid import extract_timestamp_ms
+from sparkid import generate_id, extract_timestamp_ms
 
 id = generate_id()
 ms = extract_timestamp_ms(id)
