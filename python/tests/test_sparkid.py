@@ -531,8 +531,8 @@ class TestForkSafety:
         for _ in range(100):
             gen()
 
-        # Reset via the internal Rust method
-        gen._inner.reset()
+        # Reset via the Rust method
+        gen.reset()
 
         # After reset, should produce valid IDs starting fresh
         id_ = gen()
@@ -543,7 +543,7 @@ class TestForkSafety:
         gen = IdGenerator()
         for _ in range(100):
             gen()
-        gen._inner.reset()
+        gen.reset()
         id_ = gen()
         assert len(id_) == 21
         assert set(id_) <= VALID_CHARS

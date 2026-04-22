@@ -17,7 +17,7 @@ from sparkid._native import (
 # Track all live generators for fork-safety reset.
 _all_generators: weakref.WeakSet["IdGenerator"] = weakref.WeakSet()
 
-class IdGenerator:
+class IdGenerator(_RustIdGenerator):
     """Generates 21-char, Base58, time-sortable, collision-resistant unique IDs.
 
     Each ID is composed of three parts:
@@ -56,10 +56,10 @@ class IdGenerator:
     monotonic ordering, protect a single shared instance with a lock.
     """
 
-    __slots__ = ("__weakref__", "_inner")
+    __slots__ = ("__weakref__",)
 
     def __init__(self) -> None:
-        self._inner = _RustIdGenerator()
+        super().__init__()
         _all_generators.add(self)
 
     def generate_at(self, timestamp: "datetime | int") -> str:
@@ -92,10 +92,7 @@ class IdGenerator:
                 f"timestamp must be a datetime or int,"
                 f" got {type(timestamp).__name__}"
             )
-        return self._inner.generate_at(timestamp_ms)
-
-    def __call__(self) -> str:
-        return self._inner.generate()
+        return _RustIdGenerator.generate_at(self, timestamp_ms)
 
 
 def generate_id_at(timestamp: "datetime | int") -> str:
@@ -153,7 +150,7 @@ def _after_fork_in_child() -> None:
     """Reset all generator state after fork to prevent duplicate IDs."""
     _reset_thread_local()
     for gen in _all_generators:
-        gen._inner.reset()
+        gen.reset()
 
 
 if hasattr(os, "register_at_fork"):
