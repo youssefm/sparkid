@@ -4,7 +4,6 @@ import os
 import threading
 import time
 from collections import Counter
-from datetime import datetime, timezone
 
 import pytest
 
@@ -654,8 +653,7 @@ class TestExtractTimestamp:
         before = time.time_ns() // 1_000_000
         id_ = generate_id()
         after = time.time_ns() // 1_000_000
-        ts = extract_timestamp(id_)
-        extracted_ms = int(ts.timestamp() * 1000)
+        extracted_ms = extract_timestamp(id_)
         assert before - 5 <= extracted_ms <= after + 5
 
     def test_known_value(self):
@@ -668,9 +666,7 @@ class TestExtractTimestamp:
             chars.append(ALPHABET[r])
         encoded = "".join(reversed(chars))
         id_ = encoded + "1" * 13  # pad counter + random with '1's
-        ts = extract_timestamp(id_)
-        assert int(ts.timestamp() * 1000) == known_ms
-        assert ts.tzinfo is not None
+        assert extract_timestamp(id_) == known_ms
 
     def test_wrong_length_raises(self):
         import pytest
@@ -842,14 +838,6 @@ class TestGenerateAt:
         decoded = _decode_timestamp(id_[:8])
         assert decoded == ts
 
-    def test_timestamp_encoding_datetime(self):
-        gen = IdGenerator()
-        dt = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
-        expected_ms = int(dt.timestamp() * 1000)
-        id_ = gen.generate_at(dt)
-        decoded = _decode_timestamp(id_[:8])
-        assert decoded == expected_ms
-
     def test_monotonicity_same_ms(self):
         gen = IdGenerator()
         ts = int(time.time() * 1000)
@@ -871,20 +859,6 @@ class TestGenerateAt:
         id_past = gen.generate_at(ts)  # earlier timestamp
         assert id_past > id_future  # still monotonically increasing
 
-    def test_datetime_timezone_aware(self):
-        gen = IdGenerator()
-        dt = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
-        id_ = gen.generate_at(dt)
-        assert len(id_) == 21
-        decoded_ms = _decode_timestamp(id_[:8])
-        assert decoded_ms == int(dt.timestamp() * 1000)
-
-    def test_datetime_naive_raises_valueerror(self):
-        gen = IdGenerator()
-        dt = datetime(2024, 1, 1, 0, 0, 0)  # naive
-        with pytest.raises(ValueError, match="timezone-aware"):
-            gen.generate_at(dt)
-
     def test_int_input_works(self):
         gen = IdGenerator()
         ts = 1_700_000_000_000
@@ -892,23 +866,6 @@ class TestGenerateAt:
         assert len(id_) == 21
         decoded = _decode_timestamp(id_[:8])
         assert decoded == ts
-
-    def test_bool_accepted_as_int(self):
-        gen = IdGenerator()
-        id_true = gen.generate_at(True)
-        id_false = gen.generate_at(False)
-        assert len(id_true) == 21
-        assert len(id_false) == 21
-
-    def test_float_raises_typeerror(self):
-        gen = IdGenerator()
-        with pytest.raises(TypeError):
-            gen.generate_at(1.5)
-
-    def test_str_raises_typeerror(self):
-        gen = IdGenerator()
-        with pytest.raises(TypeError):
-            gen.generate_at("123")
 
     def test_negative_int_raises_valueerror(self):
         gen = IdGenerator()
