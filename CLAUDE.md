@@ -9,11 +9,11 @@ js/          # TypeScript package (npm: sparkid)
   src/index.ts           # Single-file implementation
   tests/test_sparkid.ts  # Tests (node:test + node:assert)
   bench/benchmark.ts     # Benchmarks + correctness checks
-python/      # Python package (PyPI: sparkid)
-  src/sparkid/_generator.py   # Core implementation
-  src/sparkid/__init__.py     # Public API re-exports
-  tests/test_sparkid.py       # Tests (pytest)
-  bench/benchmark.py          # Benchmarks + correctness checks
+python/      # Python package (PyPI: sparkid) — PyO3 native extension
+  rust/lib.rs              # Rust/PyO3 native extension (hot path, built with maturin)
+  src/sparkid/__init__.py  # Python subclass (fork-safety) + re-exports
+  tests/test_sparkid.py    # Tests (pytest)
+  bench/benchmark.py       # Benchmarks + correctness checks
 rust/        # Rust crate (crates.io: sparkid)
   src/lib.rs             # Crate root, re-exports public API
   src/generator.rs       # Core implementation (no_std + alloc)
@@ -32,6 +32,7 @@ rust/        # Rust crate (crates.io: sparkid)
 
 **Python** (`python/`):
 - `uv run pytest tests/` — run tests
+- `uv run maturin develop --release` — rebuild native extension (required after changing `rust/lib.rs`; `uv sync` alone won't rebuild)
 - `uv sync --group test` — install test deps (pytest)
 - `uv sync` — set up venv and install sparkid
 - `uv sync --all-groups` — also install benchmark deps
@@ -44,6 +45,9 @@ rust/        # Rust crate (crates.io: sparkid)
 - `cargo bench` — run Criterion benchmarks (includes comparison)
 - `cargo clippy` — lint
 - `cargo build -p no_std_check` — verify no_std compatibility
+
+**Cross-language** (repo root):
+- `python3 bench_compare.py` — run all three benchmarks and generate `benchmark_comparison.png` (requires `pip install matplotlib`)
 
 ## Tests
 
