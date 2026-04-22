@@ -105,7 +105,7 @@ fn generate_id_at(py: Python<'_>, timestamp_ms: i64) -> PyResult<Bound<'_, PyStr
 }
 
 #[pyfunction]
-fn extract_timestamp(id: &str) -> PyResult<u64> {
+fn extract_timestamp_ms(id: &str) -> PyResult<u64> {
     let spark_id = SparkId::from_str(id).map_err(|e| {
         pyo3::exceptions::PyValueError::new_err(e.to_string())
     })?;
@@ -151,7 +151,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIdGenerator>()?;
     m.add_function(wrap_pyfunction!(generate_id, m)?)?;
     m.add_function(wrap_pyfunction!(generate_id_at, m)?)?;
-    m.add_function(wrap_pyfunction!(extract_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_timestamp_ms, m)?)?;
     m.add_function(wrap_pyfunction!(to_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(from_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(reset_thread_local, m)?)?;

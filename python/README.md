@@ -26,12 +26,12 @@ id = generate_id()
 ### Extract timestamp
 
 ```python
-from sparkid import extract_timestamp
+from sparkid import extract_timestamp_ms
 
 id = generate_id()
-dt = extract_timestamp(id)
-print(dt.isoformat())
-# => "2025-11-14T22:13:20+00:00"
+ms = extract_timestamp_ms(id)
+print(ms)
+# => 1731622400000
 ```
 
 ### Binary representation

@@ -5,7 +5,7 @@ import weakref
 
 from sparkid._native import (
     IdGenerator as _RustIdGenerator,
-    extract_timestamp,
+    extract_timestamp_ms,
     from_bytes,
     generate_id,
     generate_id_at,
@@ -71,7 +71,7 @@ if hasattr(os, "register_at_fork"):
 __all__ = [
     "generate_id",
     "generate_id_at",
-    "extract_timestamp",
+    "extract_timestamp_ms",
     "to_bytes",
     "from_bytes",
     "IdGenerator",

@@ -11,7 +11,7 @@ from sparkid import (
     IdGenerator,
     _after_fork_in_child,
     _all_generators,
-    extract_timestamp,
+    extract_timestamp_ms,
     from_bytes,
     generate_id,
     generate_id_at,
@@ -629,14 +629,14 @@ class TestPublicAPI:
 
         assert hasattr(sparkid, "generate_id")
         assert hasattr(sparkid, "generate_id_at")
-        assert hasattr(sparkid, "extract_timestamp")
+        assert hasattr(sparkid, "extract_timestamp_ms")
         assert hasattr(sparkid, "to_bytes")
         assert hasattr(sparkid, "from_bytes")
         assert hasattr(sparkid, "IdGenerator")
         assert sparkid.__all__ == [
             "generate_id",
             "generate_id_at",
-            "extract_timestamp",
+            "extract_timestamp_ms",
             "to_bytes",
             "from_bytes",
             "IdGenerator",
@@ -644,7 +644,7 @@ class TestPublicAPI:
 
 
 # ---------------------------------------------------------------------------
-# extract_timestamp
+# extract_timestamp_ms
 # ---------------------------------------------------------------------------
 
 
@@ -653,7 +653,7 @@ class TestExtractTimestamp:
         before = time.time_ns() // 1_000_000
         id_ = generate_id()
         after = time.time_ns() // 1_000_000
-        extracted_ms = extract_timestamp(id_)
+        extracted_ms = extract_timestamp_ms(id_)
         assert before - 5 <= extracted_ms <= after + 5
 
     def test_known_value(self):
@@ -666,27 +666,27 @@ class TestExtractTimestamp:
             chars.append(ALPHABET[r])
         encoded = "".join(reversed(chars))
         id_ = encoded + "1" * 13  # pad counter + random with '1's
-        assert extract_timestamp(id_) == known_ms
+        assert extract_timestamp_ms(id_) == known_ms
 
     def test_wrong_length_raises(self):
         import pytest
 
         with pytest.raises(ValueError):
-            extract_timestamp("abc")
+            extract_timestamp_ms("abc")
         with pytest.raises(ValueError):
-            extract_timestamp("1" * 20)
+            extract_timestamp_ms("1" * 20)
         with pytest.raises(ValueError):
-            extract_timestamp("1" * 22)
+            extract_timestamp_ms("1" * 22)
 
     def test_invalid_chars_raises(self):
         import pytest
 
         with pytest.raises(ValueError):
-            extract_timestamp("0" + "1" * 20)
+            extract_timestamp_ms("0" + "1" * 20)
         with pytest.raises(ValueError):
-            extract_timestamp("O" + "1" * 20)
+            extract_timestamp_ms("O" + "1" * 20)
         with pytest.raises(ValueError):
-            extract_timestamp("I" + "1" * 20)
+            extract_timestamp_ms("I" + "1" * 20)
 
 
 # ---------------------------------------------------------------------------
