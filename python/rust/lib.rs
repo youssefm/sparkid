@@ -53,7 +53,7 @@ fn validate_timestamp(timestamp_ms: i64) -> PyResult<u64> {
     Ok(timestamp_ms as u64)
 }
 
-#[pyclass(name = "IdGenerator")]
+#[pyclass(name = "IdGenerator", subclass)]
 struct PyIdGenerator {
     inner: IdGenerator,
 }
@@ -67,7 +67,7 @@ impl PyIdGenerator {
         }
     }
 
-    fn generate<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyString> {
+    fn __call__<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyString> {
         let id = self.inner.next_id();
         sparkid_to_pystring(py, id)
     }
