@@ -30,6 +30,10 @@ target/
 .DS_Store
 Thumbs.db
 
+# Tools
+.playwright-cli/
+.wrangler/
+
 # Environment
 .env
 .env.*

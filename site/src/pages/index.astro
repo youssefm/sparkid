@@ -1,0 +1,1319 @@
+---
+import Layout from "../layouts/Layout.astro";
+
+const exampleIds = [
+  "1ogVp65qEuNUygJHecWi9",
+  "1ogVp65w9A5syaUxXuQvh",
+  "1ogVp65w9A5sybUGyUfuc",
+];
+
+const codeJs = `<span class="kw">import</span> { generateId } <span class="kw">from</span> <span class="str">"sparkid"</span>;
+
+<span class="kw">const</span> id = <span class="fn">generateId</span>();
+<span class="cmt">// → "1ogVp65qEuNUygJHecWi9"</span>`;
+
+const codePython = `<span class="kw">from</span> sparkid <span class="kw">import</span> generate_id
+
+id = <span class="fn">generate_id</span>()
+<span class="cmt"># → "1ogVp65qEuNUygJHecWi9"</span>`;
+
+const codeRust = `<span class="kw">use</span> sparkid::SparkId;
+
+<span class="kw">let</span> id = SparkId::<span class="fn">new</span>();
+<span class="cmt">// → "1ogVp65qEuNUygJHecWi9"</span>`;
+---
+
+<Layout
+  title="sparkid — Fast, sortable, unique IDs"
+  description="Fast, time-sortable, 21-char Base58 unique ID generator for JavaScript, Python, and Rust. Zero dependencies. Strict monotonic ordering."
+>
+  <!-- ═══════════ NAV ═══════════ -->
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="/" class="nav-logo">
+        <img src="/logo.svg" alt="⚡" class="nav-logo-spark" />        <span>sparkid</span>
+      </a>
+      <div class="nav-links">
+        <a href="#anatomy">Anatomy</a>
+        <a href="#features">Features</a>
+        <a href="#examples">Code</a>
+        <a href="#benchmarks">Benchmarks</a>
+        <a
+          href="https://github.com/youssefm/sparkid"
+          target="_blank"
+          rel="noopener"
+          class="nav-github"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path
+              d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"
+            ></path>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════ HERO ═══════════ -->
+  <section class="hero">
+    <div class="hero-glow"></div>
+    <div class="hero-content">
+      <div class="hero-badge">
+        Open Source · MIT License
+      </div>
+      <h1 class="hero-title">
+        IDs engineered<br />for <span class="hero-accent">speed & order</span>
+      </h1>
+      <p class="hero-subtitle">
+        Fast, time-sortable, 21-character Base58 unique IDs.
+        No hyphens, no ambiguous characters, no wasted bytes.
+        <br /><span style="display:inline-block;margin-top:0.4em;">For JavaScript, Python, and Rust.</span>
+      </p>
+
+      <div class="hero-install">
+        <div class="install-tabs" role="tablist">
+          <button class="install-tab active" data-lang="js" role="tab">npm</button>
+          <button class="install-tab" data-lang="python" role="tab">pip</button>
+          <button class="install-tab" data-lang="rust" role="tab">cargo</button>
+        </div>
+        <div class="install-panel">
+          <code class="install-cmd" data-lang="js">npm install sparkid</code>
+          <code class="install-cmd hidden" data-lang="python">pip install sparkid</code>
+          <code class="install-cmd hidden" data-lang="rust">cargo add sparkid</code>
+          <button class="install-copy" aria-label="Copy install command">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="hero-ids">
+        {exampleIds.map((id, i) => (
+          <div class="hero-id" style={{"animation-delay": `${i * 150}ms`}}>
+            <span class="hero-id-ts">{id.slice(0, 8)}</span><span class="hero-id-ctr">{id.slice(8, 14)}</span><span class="hero-id-rand">{id.slice(14)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ ANATOMY ═══════════ -->
+  <section class="section" id="anatomy">
+    <div class="container">
+      <div class="section-label">How it works</div>
+      <h2 class="section-title">Anatomy of a SparkID</h2>
+      <p class="section-desc">
+        Every SparkID packs a millisecond-precision timestamp, a monotonic counter,
+        and cryptographic randomness into 21 Base58 characters.
+      </p>
+
+      <div class="anatomy-card">
+        <div class="anatomy-id">
+          <div class="anatomy-segment anatomy-ts">
+            <span class="anatomy-chars">1ogVp65q</span>
+            <div class="anatomy-line"></div>
+            <div class="anatomy-label">
+              <strong>Timestamp</strong>
+              <span>8 chars · ms since epoch · good until year 6028</span>
+            </div>
+          </div>
+          <div class="anatomy-segment anatomy-ctr">
+            <span class="anatomy-chars">EuNUyg</span>
+            <div class="anatomy-line"></div>
+            <div class="anatomy-label">
+              <strong>Counter</strong>
+              <span>6 chars · randomly seeded · monotonic</span>
+            </div>
+          </div>
+          <div class="anatomy-segment anatomy-rand">
+            <span class="anatomy-chars">JHecWi9</span>
+            <div class="anatomy-line"></div>
+            <div class="anatomy-label">
+              <strong>Random</strong>
+              <span>7 chars · cryptographically secure randomness</span>
+            </div>
+          </div>
+        </div>
+        <div class="anatomy-properties">
+          <div class="anatomy-prop">
+            <div class="anatomy-prop-icon">↕</div>
+            <div>
+              <strong>Sortable</strong>
+              <p>Lexicographic string comparison preserves temporal order</p>
+            </div>
+          </div>
+          <div class="anatomy-prop">
+            <div class="anatomy-prop-icon">↑</div>
+            <div>
+              <strong>Monotonic</strong>
+              <p>Counter ensures strict ordering even at sub-millisecond throughput</p>
+            </div>
+          </div>
+          <div class="anatomy-prop">
+            <div class="anatomy-prop-icon">🔒</div>
+            <div>
+              <strong>Collision-resistant</strong>
+              <p>76 bits of entropy per millisecond — more than UUID v7</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ COMPARISON ═══════════ -->
+  <section class="section section-alt" id="features">
+    <div class="container">
+      <div class="section-label">Why sparkid</div>
+      <h2 class="section-title">Compare what matters</h2>
+      <p class="section-desc">
+        sparkid gives you the best of every world — compact, sortable,
+        monotonic, fast, and with zero dependencies.
+      </p>
+
+      <div class="table-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th class="col-highlight">sparkid</th>
+              <th>UUID v4</th>
+              <th>UUID v7</th>
+              <th>nanoid</th>
+              <th class="col-ulid">ULID</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="row-label">Length</td>
+              <td class="col-highlight"><strong>21</strong></td>
+              <td>36</td>
+              <td>36</td>
+              <td>21</td>
+              <td class="col-ulid">26</td>
+            </tr>
+            <tr>
+              <td class="row-label">Sortable</td>
+              <td class="col-highlight">✓</td>
+              <td class="no">✗</td>
+              <td>✓</td>
+              <td class="no">✗</td>
+              <td class="col-ulid">✓</td>
+            </tr>
+            <tr>
+              <td class="row-label">Monotonic</td>
+              <td class="col-highlight">✓</td>
+              <td class="no">✗</td>
+              <td class="weak">Opt-in</td>
+              <td class="no">✗</td>
+              <td class="col-ulid weak">Opt-in</td>
+            </tr>
+            <tr>
+              <td class="row-label">Binary repr.</td>
+              <td class="col-highlight">16 bytes</td>
+              <td>16 bytes</td>
+              <td>16 bytes</td>
+              <td class="no">✗</td>
+              <td class="col-ulid">16 bytes</td>
+            </tr>
+            <tr>
+              <td class="row-label">Readable</td>
+              <td class="col-highlight"><span class="subtle">Base58</span></td>
+              <td class="weak">Hex</td>
+              <td class="weak">Hex</td>
+              <td class="weak">Mixed</td>
+              <td class="col-ulid weak">Base32</td>
+            </tr>
+            <tr>
+              <td class="row-label">Performance</td>
+              <td class="col-highlight"><span class="perf-badge">Fastest</span></td>
+              <td>Moderate</td>
+              <td>Slow</td>
+              <td>Moderate</td>
+              <td class="col-ulid">Slow</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ CODE EXAMPLES ═══════════ -->
+  <section class="section" id="examples">
+    <div class="container">
+      <div class="section-label">Get started</div>
+      <h2 class="section-title">Three languages, one API</h2>
+      <p class="section-desc">
+        Identical algorithm, idiomatic API. Pick your language and generate
+        SparkIDs in one line.
+      </p>
+
+      <div class="code-tabs" role="tablist">
+        <button class="code-tab active" data-code="js" role="tab">
+          <span class="code-tab-dot js-dot"></span>
+          JavaScript
+        </button>
+        <button class="code-tab" data-code="python" role="tab">
+          <span class="code-tab-dot py-dot"></span>
+          Python
+        </button>
+        <button class="code-tab" data-code="rust" role="tab">
+          <span class="code-tab-dot rs-dot"></span>
+          Rust
+        </button>
+      </div>
+
+      <div class="code-panels">
+        <pre class="code-panel" data-code="js"><code set:html={codeJs} /></pre>
+
+        <pre class="code-panel hidden" data-code="python"><code set:html={codePython} /></pre>
+
+        <pre class="code-panel hidden" data-code="rust"><code set:html={codeRust} /></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ FEATURES GRID ═══════════ -->
+  <section class="section section-alt" id="details">
+    <div class="container">
+      <div class="features-grid">
+        <div class="feature-card">
+          <div class="feature-icon">⚡</div>
+          <h3>Blazing fast</h3>
+          <p>
+            Up to 23M SparkIDs/sec in Rust, 8M in JavaScript, 7.5M in Python.
+            Faster than UUID, nanoid, and ULID in every language.
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🔤</div>
+          <h3>Human readable</h3>
+          <p>
+            Base58 drops ambiguous characters — no <code>0</code>/<code>O</code>,
+            no <code>I</code>/<code>l</code>. Double-click to select the whole ID.
+            Read it aloud without confusion. Copy it from a log on the first try.
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">📦</div>
+          <h3>16-byte binary</h3>
+          <p>
+            Pack any SparkID into 16 bytes for efficient storage. Sort order is
+            preserved — byte comparison matches string comparison.
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🧵</div>
+          <h3>Thread &amp; fork safe</h3>
+          <p>
+            Per-thread generators in Python and Rust. Python automatically
+            reseeds on <code>fork()</code> — no stale state in child processes.
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🪶</div>
+          <h3>Zero dependencies</h3>
+          <p>
+            JS and Python have no runtime dependencies at all. Rust depends
+            only on <code>rand</code> for cryptographically secure randomness.
+          </p>
+        </div>
+        <div class="feature-card">
+          <div class="feature-icon">🎯</div>
+          <h3>No bias</h3>
+          <p>
+            Random bytes are rejection-sampled to Base58 — never modulo.
+            Uniform distribution across the full output space.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ BENCHMARKS ═══════════ -->
+  <section class="section" id="benchmarks">
+    <div class="container">
+      <div class="section-label">Performance</div>
+      <h2 class="section-title">Measured, not claimed</h2>
+      <p class="section-desc">
+        Median throughput across JavaScript, Python, and Rust.
+      </p>
+
+      <div class="bench-grid">
+        <div class="bench-lang">
+          <h3 class="bench-lang-title">JavaScript</h3>
+          <div class="bench-bars">
+            <div class="bench-row">
+              <span class="bench-name">sparkid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar bench-bar-accent" style="width: 100%"></div>
+              </div>
+              <span class="bench-value">8.2M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">UUID v4</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 54.9%"></div>
+              </div>
+              <span class="bench-value">4.5M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">nanoid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 47.6%"></div>
+              </div>
+              <span class="bench-value">3.9M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">ulid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 35.4%"></div>
+              </div>
+              <span class="bench-value">2.9M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">UUID v7</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 20.7%"></div>
+              </div>
+              <span class="bench-value">1.7M</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bench-lang">
+          <h3 class="bench-lang-title">Python</h3>
+          <div class="bench-bars">
+            <div class="bench-row">
+              <span class="bench-name">sparkid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar bench-bar-accent" style="width: 100%"></div>
+              </div>
+              <span class="bench-value">7.5M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">UUID v4</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 4.9%"></div>
+              </div>
+              <span class="bench-value">370K</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">UUID v7</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 3.7%"></div>
+              </div>
+              <span class="bench-value">275K</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">nanoid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 3.1%"></div>
+              </div>
+              <span class="bench-value">232K</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">ulid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 2.3%"></div>
+              </div>
+              <span class="bench-value">172K</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bench-lang">
+          <h3 class="bench-lang-title">Rust</h3>
+          <div class="bench-bars">
+            <div class="bench-row">
+              <span class="bench-name">sparkid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar bench-bar-accent" style="width: 100%"></div>
+              </div>
+              <span class="bench-value">23.2M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">ulid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 69%"></div>
+              </div>
+              <span class="bench-value">16.0M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">UUID v4</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 6%"></div>
+              </div>
+              <span class="bench-value">1.4M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">UUID v7</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 5.6%"></div>
+              </div>
+              <span class="bench-value">1.3M</span>
+            </div>
+            <div class="bench-row">
+              <span class="bench-name">nanoid</span>
+              <div class="bench-bar-wrap">
+                <div class="bench-bar" style="width: 5.2%"></div>
+              </div>
+              <span class="bench-value">1.2M</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="bench-note">
+        Median IDs/second · Higher is better ·
+        <a href="https://github.com/youssefm/sparkid/blob/main/bench_compare.py" target="_blank" rel="noopener" style="color: var(--text-muted); text-decoration: underline;">Run it yourself</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- ═══════════ CTA ═══════════ -->
+  <section class="section section-alt cta-section">
+    <div class="container cta-container">
+      <h2 class="cta-title">Start generating</h2>
+      <p class="cta-desc">
+        Install sparkid in your language of choice and generate your first SparkID in seconds.
+      </p>
+      <div class="cta-links">
+        <a href="https://www.npmjs.com/package/sparkid" target="_blank" rel="noopener" class="cta-link">
+          npm
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7"/><path d="M7 7h10v10"/></svg>
+        </a>
+        <a href="https://pypi.org/project/sparkid/" target="_blank" rel="noopener" class="cta-link">
+          PyPI
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7"/><path d="M7 7h10v10"/></svg>
+        </a>
+        <a href="https://crates.io/crates/sparkid" target="_blank" rel="noopener" class="cta-link">
+          crates.io
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7"/><path d="M7 7h10v10"/></svg>
+        </a>
+        <a href="https://github.com/youssefm/sparkid" target="_blank" rel="noopener" class="cta-link cta-link-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"></path>
+          </svg>
+          View on GitHub
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ FOOTER ═══════════ -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-left">
+        <img src="/logo.svg" alt="⚡" class="nav-logo-spark" /> sparkid
+      </div>
+      <div class="footer-right">
+        MIT License · Made by
+        <a href="https://www.youssefm.com" target="_blank" rel="noopener">Youssef</a>
+      </div>
+    </div>
+  </footer>
+</Layout>
+
+<!-- ═══════════ STYLES ═══════════ -->
+<style>
+  /* ── NAV ── */
+  .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+    background: rgba(9, 9, 11, 0.8);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .nav-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 2rem;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .nav-logo {
+    font-family: var(--font-display);
+    font-weight: 600;
+    font-size: 1.15rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    letter-spacing: -0.02em;
+  }
+  .nav-logo-spark {
+    width: 1.25em;
+    height: 1.25em;
+    vertical-align: -0.15em;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 1.75rem;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+  }
+  .nav-links a:hover {
+    color: var(--text);
+  }
+  .nav-github {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-weight: 500;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .nav-github:hover {
+    border-color: var(--text-muted);
+    background: var(--surface);
+  }
+
+  /* ── HERO ── */
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7rem 2rem 4rem;
+    overflow: hidden;
+  }
+  .hero-glow {
+    position: absolute;
+    top: -40%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    height: 600px;
+    background: radial-gradient(
+      ellipse at center,
+      var(--accent-glow) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+  }
+  .hero-content {
+    position: relative;
+    text-align: center;
+    max-width: 720px;
+  }
+  .hero-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    padding: 0.35rem 1rem;
+    margin-bottom: 2rem;
+    animation: fadeUp 0.6s ease both;
+  }
+  .hero-badge-dot {
+    width: 6px;
+    height: 6px;
+    background: #22c55e;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #22c55e;
+  }
+  .hero-title {
+    font-family: var(--font-display);
+    font-size: clamp(2.5rem, 6vw, 4.25rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    margin-bottom: 1.5rem;
+    animation: fadeUp 0.6s ease 0.1s both;
+  }
+  .hero-accent {
+    color: var(--accent);
+  }
+  .hero-subtitle {
+    font-size: 1.125rem;
+    line-height: 1.7;
+    color: var(--text-secondary);
+    max-width: 560px;
+    margin: 0 auto 2.5rem;
+    animation: fadeUp 0.6s ease 0.2s both;
+  }
+
+  /* ── INSTALL WIDGET ── */
+  .hero-install {
+    max-width: 420px;
+    margin: 0 auto 3rem;
+    animation: fadeUp 0.6s ease 0.3s both;
+  }
+  .install-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: -1px;
+    position: relative;
+    z-index: 1;
+  }
+  .install-tab {
+    flex: 1;
+    padding: 0.55rem 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+  }
+  .install-tab:first-child {
+    border-radius: var(--radius) 0 0 0;
+  }
+  .install-tab:last-child {
+    border-radius: 0 var(--radius) 0 0;
+  }
+  .install-tab:not(:first-child) {
+    border-left: none;
+  }
+  .install-tab.active {
+    color: var(--accent);
+    background: var(--surface);
+  }
+  .install-panel {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0 0 var(--radius) var(--radius);
+    padding: 0.85rem 1rem;
+  }
+  .install-cmd {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--text);
+  }
+  .install-cmd.hidden {
+    display: none;
+  }
+  .install-copy {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0.25rem;
+    border-radius: 4px;
+    transition: color 0.2s, background 0.2s;
+  }
+  .install-copy:hover {
+    color: var(--text);
+    background: var(--surface-raised);
+  }
+
+  /* ── HERO IDS ── */
+  .hero-ids {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    animation: fadeUp 0.6s ease 0.4s both;
+  }
+  .hero-id {
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+    opacity: 0;
+    animation: fadeUp 0.5s ease forwards;
+    color: var(--text-muted);
+  }
+  .hero-id-ts {
+    color: var(--accent);
+  }
+  .hero-id-ctr {
+    color: #60a5fa;
+  }
+  .hero-id-rand {
+    color: var(--text-muted);
+  }
+
+  /* ── SECTIONS ── */
+  .section {
+    padding: 6rem 2rem;
+  }
+  .section-alt {
+    background: var(--surface);
+  }
+  .container {
+    max-width: var(--max-width);
+    margin: 0 auto;
+  }
+  .section-label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+  }
+  .section-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 3.5vw, 2.5rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 1rem;
+  }
+  .section-desc {
+    color: var(--text-secondary);
+    font-size: 1.05rem;
+    line-height: 1.7;
+    max-width: 600px;
+    margin-bottom: 3rem;
+  }
+
+  /* ── ANATOMY ── */
+  .anatomy-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 3rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: center;
+  }
+  .anatomy-id {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+  }
+  .anatomy-segment {
+    text-align: center;
+    position: relative;
+  }
+  .anatomy-chars {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    display: block;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    margin-bottom: 1rem;
+  }
+  .anatomy-ts .anatomy-chars {
+    color: var(--accent);
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.2);
+  }
+  .anatomy-ctr .anatomy-chars {
+    color: #60a5fa;
+    background: rgba(96, 165, 250, 0.08);
+    border: 1px solid rgba(96, 165, 250, 0.2);
+  }
+  .anatomy-rand .anatomy-chars {
+    color: var(--text-muted);
+    background: rgba(113, 113, 122, 0.08);
+    border: 1px solid rgba(113, 113, 122, 0.2);
+  }
+  .anatomy-line {
+    width: 1px;
+    height: 24px;
+    margin: 0 auto 0.75rem;
+    background: var(--border);
+  }
+  .anatomy-label {
+    font-size: 0.85rem;
+  }
+  .anatomy-label strong {
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+  .anatomy-label span {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+  }
+  .anatomy-properties {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .anatomy-prop {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+  .anatomy-prop-icon {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+  .anatomy-prop strong {
+    display: block;
+    font-size: 0.9rem;
+    margin-bottom: 0.2rem;
+  }
+  .anatomy-prop p {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+
+  /* ── COMPARISON TABLE ── */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 0 -0.5rem;
+    padding: 0 0.5rem;
+  }
+  .compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  .compare-table th,
+  .compare-table td {
+    padding: 0.85rem 1.25rem;
+    text-align: center;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .compare-table th {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .compare-table .row-label {
+    text-align: left;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .compare-table .col-highlight {
+    background: rgba(245, 158, 11, 0.05);
+    color: var(--text);
+    font-weight: 500;
+  }
+  .compare-table thead .col-highlight {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .compare-table .no {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+  .compare-table .weak {
+    color: var(--text-muted);
+    font-size: 0.9em;
+  }
+  .compare-table .detail {
+    font-size: 0.75em;
+    color: var(--accent);
+    font-weight: 400;
+  }
+  .perf-badge {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--accent);
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    padding: 0.2rem 0.6rem;
+    border-radius: 100px;
+    font-weight: 500;
+  }
+
+  /* ── CODE EXAMPLES ── */
+  .code-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: -1px;
+    position: relative;
+    z-index: 1;
+  }
+  .code-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    font-family: var(--font-body);
+    font-size: 0.875rem;
+    font-weight: 500;
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: var(--radius) var(--radius) 0 0;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .code-tab.active {
+    color: var(--text);
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  .code-tab-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+  }
+  .js-dot { background: #f7df1e; }
+  .py-dot { background: #3776ab; }
+  .rs-dot { background: #dea584; }
+
+  .code-panels {
+    border: 1px solid var(--border);
+    border-radius: 0 var(--radius-lg) var(--radius-lg) var(--radius-lg);
+    overflow: hidden;
+    max-width: 100%;
+  }
+  .code-panel {
+    background: var(--surface);
+    padding: 2rem;
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    line-height: 1.8;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .code-panel.hidden {
+    display: none;
+  }
+  .code-panel code {
+    color: var(--text-secondary);
+  }
+  .kw { color: #c084fc; }
+  .str { color: #86efac; }
+  .fn { color: #60a5fa; }
+  .cmt { color: var(--text-muted); font-style: italic; }
+  .num { color: #fbbf24; }
+  .typ { color: #f472b6; }
+
+  /* ── FEATURES GRID ── */
+  .features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+  }
+  .feature-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    transition: border-color 0.3s;
+  }
+  .feature-card:hover {
+    border-color: var(--text-muted);
+  }
+  .feature-icon {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+  .feature-card h3 {
+    font-family: var(--font-display);
+    font-size: 1.05rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+  .feature-card p {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+
+  /* ── BENCHMARKS ── */
+  .bench-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+  .bench-lang {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.75rem;
+  }
+  .bench-lang-title {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 1.25rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .bench-bars {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .bench-row {
+    display: grid;
+    grid-template-columns: 60px 1fr 48px;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .bench-name {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-align: right;
+  }
+  .bench-bar-wrap {
+    height: 20px;
+    background: var(--surface-raised);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .bench-bar {
+    height: 100%;
+    background: var(--border);
+    border-radius: 4px;
+    transition: width 1s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .bench-bar-accent {
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+  }
+  .bench-value {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+  .bench-note {
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 1.5rem;
+  }
+
+  /* ── CTA ── */
+  .cta-section {
+    text-align: center;
+  }
+  .cta-container {
+    max-width: 560px;
+  }
+  .cta-title {
+    font-family: var(--font-display);
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.75rem;
+  }
+  .cta-desc {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    line-height: 1.6;
+    margin-bottom: 2rem;
+  }
+  .cta-links {
+    display: flex;
+    gap: 0.75rem;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .cta-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+  }
+  .cta-link:hover {
+    color: var(--text);
+    border-color: var(--text-muted);
+    background: var(--surface-raised);
+  }
+  .cta-link-primary {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+  }
+  .cta-link-primary:hover {
+    background: var(--text-secondary);
+    color: var(--bg);
+    border-color: var(--text-secondary);
+  }
+
+  /* ── FOOTER ── */
+  .footer {
+    padding: 2rem;
+    border-top: 1px solid var(--border-subtle);
+  }
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+  .footer-left {
+    font-family: var(--font-display);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .footer-right a {
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border);
+    transition: color 0.2s;
+  }
+  .footer-right a:hover {
+    color: var(--text);
+  }
+
+  /* ── ANIMATIONS ── */
+  @keyframes fadeUp {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    .anatomy-card {
+      grid-template-columns: 1fr;
+      padding: 1.5rem;
+    }
+    .anatomy-id {
+      flex-wrap: nowrap;
+      gap: 0.25rem;
+    }
+    .anatomy-line {
+      height: 16px;
+      margin-bottom: 0.5rem;
+    }
+    .anatomy-label span {
+      font-size: 0.7rem;
+    }
+    .anatomy-chars {
+      font-size: 1rem;
+      padding: 0.5rem 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .features-grid,
+    .bench-grid {
+      grid-template-columns: 1fr;
+    }
+    .nav-links a:not(.nav-github) {
+      display: none;
+    }
+    .compare-table {
+      font-size: 0.78rem;
+    }
+    .compare-table th,
+    .compare-table td {
+      padding: 0.6rem 0.6rem;
+    }
+  }
+  @media (max-width: 600px) {
+    .hero {
+      padding: 6rem 1.25rem 3rem;
+    }
+    .section {
+      padding: 4rem 1.25rem;
+    }
+    .hero-subtitle br {
+      display: none;
+    }
+    .anatomy-chars {
+      font-size: 0.9rem;
+      padding: 0.4rem 0.4rem;
+    }
+    .anatomy-label span {
+      font-size: 0.65rem;
+    }
+    .code-panel {
+      padding: 1.25rem;
+      font-size: 0.78rem;
+    }
+    .code-tabs {
+      gap: 0.25rem;
+    }
+    .code-tab {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8rem;
+    }
+    .compare-table {
+      font-size: 0.7rem;
+    }
+    .compare-table th,
+    .compare-table td {
+      padding: 0.5rem 0.25rem;
+      white-space: nowrap;
+    }
+    .compare-table .row-label {
+      font-size: 0.68rem;
+    }
+    .perf-badge {
+      font-size: 0.65rem;
+      padding: 0.15rem 0.4rem;
+    }
+    .hero-id {
+      font-size: 0.8rem;
+    }
+    .col-ulid {
+      display: none;
+    }
+  }
+</style>
+
+<!-- ═══════════ INTERACTIVITY ═══════════ -->
+<script is:inline>
+  function setupTabs(tabSelector, panelSelector, dataAttr) {
+    var tabs = document.querySelectorAll(tabSelector);
+    var panels = document.querySelectorAll(panelSelector);
+
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        var lang = tab.dataset[dataAttr];
+        tabs.forEach(function (t) { t.classList.remove("active"); });
+        tab.classList.add("active");
+        panels.forEach(function (p) {
+          p.classList.toggle("hidden", p.dataset[dataAttr] !== lang);
+        });
+      });
+    });
+  }
+
+  setupTabs(".install-tab", ".install-cmd", "lang");
+  setupTabs(".code-tab", ".code-panel", "code");
+
+  document.querySelector(".install-copy").addEventListener("click", function () {
+    var visible = document.querySelector(".install-cmd:not(.hidden)");
+    if (visible && visible.textContent) {
+      navigator.clipboard.writeText(visible.textContent);
+      var btn = document.querySelector(".install-copy");
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      setTimeout(function () {
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+      }, 1500);
+    }
+  });
+</script>
