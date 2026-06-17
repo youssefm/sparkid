@@ -38,3 +38,7 @@ postcard = { version = "1", features = ["alloc"] }
 [[bench]]
 name = "benchmark"
 harness = false
+
+[profile.release]
+lto = true
+codegen-units = 1

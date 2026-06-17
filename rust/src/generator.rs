@@ -223,6 +223,7 @@ impl SparkId {
     /// ```
     #[cfg(feature = "std")]
     #[allow(clippy::new_without_default)]
+    #[inline]
     pub fn new() -> Self {
         LOCAL_GEN.with(|generator| generator.borrow_mut().next_id())
     }
@@ -660,10 +661,10 @@ impl IdGenerator {
             counter_tail: FIRST_INDEX,
             cached_timestamp_packed: 0,
             cached_prefix: 0,
-            random_buffer: vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice(),
+            random_buffer: vec![0u8; 0].into_boxed_slice(),
             random_count: 0,
             random_position: 0,
-            raw_buffer: vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice(),
+            raw_buffer: vec![0u8; 0].into_boxed_slice(),
             rng: StdRng::from_os_rng(),
             #[cfg(any(test, feature = "test-internals"))]
             time_function: None,
@@ -688,6 +689,7 @@ impl IdGenerator {
     /// println!("{id}"); // no allocation
     /// ```
     #[cfg(feature = "std")]
+    #[inline]
     pub fn next_id(&mut self) -> SparkId {
         let random_position = self.prepare_next(self.current_time_ms());
         // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
@@ -716,6 +718,7 @@ impl IdGenerator {
     /// let s = id.as_str();
     /// assert_eq!(s.len(), 21);
     /// ```
+    #[inline]
     pub fn next_id_at(&mut self, timestamp_ms: u64) -> SparkId {
         let random_position = self.prepare_next(timestamp_ms);
         // SAFETY: advance() guarantees random_position + RANDOM_CHAR_COUNT <= random_count,
@@ -840,6 +843,12 @@ impl IdGenerator {
 
     #[cold]
     fn refill_random(&mut self) {
+        // Lazy allocation: buffers start empty and are sized on first refill,
+        // so a generator that is constructed but never used pays no buffer cost.
+        if self.raw_buffer.is_empty() {
+            self.raw_buffer = vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice();
+            self.random_buffer = vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice();
+        }
         self.rng.fill_bytes(&mut self.raw_buffer);
         let mut count = 0;
         for &byte in &*self.raw_buffer {

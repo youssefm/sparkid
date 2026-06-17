@@ -17,3 +17,4 @@ pyo3-build-config = { version = "0.25", features = ["resolve-config"] }
 
 [profile.release]
 codegen-units = 1
+lto = "fat"
