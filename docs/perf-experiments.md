@@ -1,11 +1,8 @@
 # Performance Experiments Log
 
-A record of optimization experiments — primarily the ones that **did not work** —
-so they are not blindly re-attempted. Each entry states what was tried, the
-measured result, and *why* it failed (the root cause is the part worth keeping).
-
-For the experiments that were kept, see commit `cb2890c`
-(`perf: LTO + inlining + lazy buffer alloc`).
+A record of optimization experiments that **did not work**, so they are not
+blindly re-attempted. Each entry states what was tried, the measured result, and
+*why* it failed (the root cause is the part worth keeping).
 
 ## Methodology
 
@@ -66,8 +63,7 @@ hardcoded. The behavior was correct (yield ratio still ~0.906); only the test's
 constant was coupled to the old size.
 
 **Why rejected.** The protocol rule is "tests must pass — don't force marginal
-wins." Editing a test to land a memory-only change that the lazy-allocation work
-(kept) already addresses for unused generators wasn't worth it. If revisited,
+wins." Editing a test to land a memory-only change wasn't worth it. If revisited,
 make `RANDOM_BATCH_SIZE` the single source of truth the test reads from, and
 treat it as a memory-vs-refill-frequency knob (keep 16384 for low thread counts;
 8192 only when per-thread memory dominates).
@@ -124,19 +120,3 @@ clarity cost.
   cannot be cached or coarsened without changing observable timestamps and
   monotonicity guarantees — out of scope for an API- and behavior-preserving
   pass.
-
-## Binary-size note
-
-The kept Rust changes (`#[inline]` ×3, lazy alloc, crate `[profile.release]`
-LTO) add **0 bytes** to a downstream consumer binary (verified with a throwaway
-consumer crate, `cargo clean` rebuild, stripped, both no-LTO and LTO profiles).
-
-- `#[inline]` on `next_id`/`new`/`next_id_at` did not grow the binary: at
-  `opt-level=3` LLVM already inlined these trivial functions across the crate
-  boundary via the rlib's MIR, with or without the attribute.
-- The crate's `[profile.release]` is ignored for consumers — Cargo only applies
-  `[profile.*]` from the root package.
-
-A first measurement showed +320 bytes; that was incremental-compilation noise
-(a partial rebuild). The `cargo clean` numbers (+0 bytes) are the trustworthy
-ones — a reminder to force a clean rebuild before comparing artifact sizes.
