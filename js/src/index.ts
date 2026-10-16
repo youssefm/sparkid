@@ -60,8 +60,8 @@ const FIRST_CHAR_CODE = ALPHABET.charCodeAt(0);
 
 // Pre-allocated buffers for getRandomValues and rejection-sampled char codes.
 // Allocated lazily on first use (in refillRandom) to avoid 32KB upfront cost
-// at import time. Held in a const object so inner functions can pull fast
-// const-local aliases (V8 optimizes const typed-array refs better than let).
+// at import time. Plain module-level `let`s: aliasing them to function-local
+// consts was measured as noise (see docs/perf-experiments.md).
 let randomRaw: Uint8Array<ArrayBuffer> | undefined;
 let randomCharCodes: Uint8Array<ArrayBuffer>;
 
@@ -163,11 +163,17 @@ function refillRandom(): void {
   crypto.getRandomValues(randomRaw);
   const lookup = RANDOM_CHARCODE_LOOKUP;
   let count = 0;
+  // Branch-free compaction: always store, advance only for accepted bytes.
+  // Rejections (~1,500 per refill) land at crypto-random positions, so an
+  // `if (charCode !== 0)` here is unpredictable and measured ~2.5x slower.
+  // A rejected byte's 0 is overwritten by the next accepted one, or sits past
+  // `count` unread. `count <= i` always holds, so the write stays in bounds.
+  // Don't write the advance as `charCode !== 0 ? 1 : 0`: V8 compiles that
+  // ternary back into a branch.
   for (let i = 0; i < RANDOM_BATCH_SIZE; i++) {
-    const cc = lookup[randomRaw[i]];
-    if (cc !== 0) {
-      randomCharCodes[count++] = cc;
-    }
+    const charCode = lookup[randomRaw[i]];
+    randomCharCodes[count] = charCode;
+    count += +(charCode !== 0);
   }
   randomCharCount = count;
   randomCharPosition = 0;

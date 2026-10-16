@@ -6,9 +6,9 @@ blindly re-attempted. Each entry states what was tried, the measured result, and
 
 ## Methodology
 
-Steady-state ID generation is ~15–33 ns; at that scale, run-to-run noise and
-machine drift easily exceed the effect being measured. Lessons that shaped how
-results below were judged:
+Steady-state ID generation is tens of ns per ID (varies by language and
+machine); at that scale, run-to-run noise and machine drift easily exceed the
+effect being measured. Lessons that shaped how results below were judged:
 
 - **Trust interleaved A/B, not sequential before/after.** Absolute timings
   drifted ~13% between runs on the same machine (e.g. `next_id` measured
@@ -21,6 +21,16 @@ results below were judged:
 - **A "win" must clear the noise floor.** Within-run variance was measured per
   language: Rust/Criterion ~0.2–2 ns, Python wall-clock ~4%, JS/V8 ~6%.
   Deltas smaller than that floor are noise, not signal.
+- **Benchmark random-dependent code with fresh random data.** A
+  micro-benchmark that reuses one fixed random buffer lets the branch predictor
+  memorize data-dependent branches. In `refillRandom`'s compaction loop that
+  hid most of a ~2.5x gap between `if` and branch-free compaction (loop only,
+  excluding `getRandomValues`: fresh data 14.2 vs 5.8 µs per refill; fixed
+  buffer ~6.4 vs ~5.8 µs).
+- **Benchmark each variant in its own function and process.** A harness that
+  calls every variant from one shared benchmark loop lets TurboFan inline them
+  into that loop and compile them differently from standalone code. This made
+  `+(bool)` look ~1.5x slower than it really is (see the ternary entry below).
 - **Memory changes are judged on bytes, not throughput.** They show up as
   "neutral" on a throughput benchmark by design; kept or rejected on allocation
   size and code clarity instead.
@@ -34,6 +44,8 @@ results below were judged:
 | Single `fromCharCode(21)` emit, prefix kept as string | JS | −30% | `charCodeAt` on a cons-string prefix is not O(1) |
 | Full buffer rewrite (prefix as `Uint8Array`) | JS | −16% | Destroys per-millisecond prefix amortization |
 | Merge raw + sampled random buffers | JS | Noise (neutral) | One-time 16 KB; adds aliasing subtlety for no speed |
+| Ternary as branch-free compaction advance | JS | ≈ `if` (16–18 vs 16–17 µs/refill) | V8 compiles `x !== 0 ? 1 : 0` back into a branch |
+| Alias module-level random buffers to locals | JS | Noise (neutral) | `let` module buffers are not the refill bottleneck |
 
 ### Rust — merge `raw_buffer` and `random_buffer`
 
@@ -112,6 +124,46 @@ JIT'd JS does not auto-vectorize the compaction loop, so aliasing blocks nothing
 process-global, allocated once), and it aliases two conceptually distinct
 buffers (raw bytes vs. sampled codes) for no measurable speed. Not worth the
 clarity cost.
+
+### JS — ternary as the branch-free compaction advance
+
+**Idea.** `refillRandom`'s compaction always stores and advances the write
+position only for accepted bytes. The obvious way to write the advance is
+`count += charCode !== 0 ? 1 : 0`.
+
+**Result.** No faster than the `if` it replaces. Each form run standalone in
+its own process on fresh random data (Node 26.10 / Apple M5 Max; µs per 16 KB
+refill, including ~1.7 µs of `getRandomValues`): `if` 15.8–17.2, ternary
+16.1–18.3, `+(charCode !== 0)` 7.2–9.7, `(charCode + 255) >> 8` 7.5–9.3.
+Bun (JavaScriptCore) showed the same pattern.
+
+**Why.** TurboFan's optimized code for the ternary has a conditional branch
+per byte (`cbnz`), so it still mispredicts on crypto-random rejections. Both
+`+(bool)` and the shift compile to straight-line code (`cset` / `add … asr`).
+The kept form is `+(charCode !== 0)`. It's as fast as the shift and needs no
+bit trick.
+
+**Measurement trap.** An earlier harness that called all variants from one
+shared benchmark function had `+(bool)` at 13.8 µs, which looked like only a
+partial fix. TurboFan had inlined it into that loop and compiled it
+differently. Run standalone, and inside `refillRandom` itself, it is
+branch-free.
+
+### JS — alias random buffers to function locals
+
+**Idea.** `refillRandom` reads two module-level `let` typed arrays. Copy them
+into function-local `const`s before the loop, on the theory that V8 optimizes
+const locals better.
+
+**Result.** Neutral. In an interleaved A/B of `generateId()` (own child process
+per variant, median of 5×2M IDs, 6 paired rounds) the aliased variant tracked
+the baseline within noise (51.8–57.3 vs 52.3–55.8 ns/ID), while the branch-free
+compaction in the same rounds ran 44.9–47.0 ns/ID. That branch-free result is
+a positive control: it shows this setup can detect a real ~15% change. Copying
+the buffers into locals on top of the branch-free version was also neutral.
+
+**Why rejected.** The loop's cost was branch mispredicts, not module-variable
+access. The aliases added lines and no speed.
 
 ## Off the table (not attempted)
 
