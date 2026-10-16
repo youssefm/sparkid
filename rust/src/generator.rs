@@ -23,9 +23,24 @@ const COUNTER_CHAR_COUNT: usize = 6;
 const RANDOM_CHAR_COUNT: usize = 7;
 const ID_LENGTH: usize = TIMESTAMP_CHAR_COUNT + COUNTER_CHAR_COUNT + RANDOM_CHAR_COUNT;
 
-// How many random bytes to fetch per batch. After rejection sampling,
+// How many 6-bit candidates to draw per batch. After rejection sampling,
 // ~90.6% survive (58/64), yielding ~14848 valid chars (~2121 IDs).
 const RANDOM_BATCH_SIZE: usize = 16384;
+
+// Each candidate needs only 6 random bits, so every 3 RNG bytes (24 bits) are
+// split into 4 candidates instead of spending a whole byte (and discarding 2
+// bits) per candidate. Every 6-bit field of a uniform 24-bit word is itself
+// uniform and independent of the others, so rejection sampling is unchanged.
+const BITS_PER_CANDIDATE: u32 = 6;
+const CANDIDATE_MASK: u32 = (1 << BITS_PER_CANDIDATE) - 1;
+const RAW_BYTES_PER_CHUNK: usize = 3;
+const RAW_BITS_PER_CHUNK: u32 = RAW_BYTES_PER_CHUNK as u32 * u8::BITS;
+const CANDIDATES_PER_CHUNK: usize = (RAW_BITS_PER_CHUNK / BITS_PER_CANDIDATE) as usize;
+const RAW_BATCH_SIZE: usize = RANDOM_BATCH_SIZE / CANDIDATES_PER_CHUNK * RAW_BYTES_PER_CHUNK;
+// Every raw bit lands in exactly one candidate, and the batch is a whole
+// number of chunks.
+const _: () = assert!(RAW_BITS_PER_CHUNK % BITS_PER_CANDIDATE == 0);
+const _: () = assert!(RANDOM_BATCH_SIZE % CANDIDATES_PER_CHUNK == 0);
 
 // Index-space constants (indices 0-57 into the Base58 alphabet)
 const FIRST_INDEX: u8 = 0;
@@ -75,6 +90,26 @@ const DECODE: [u8; 256] = {
     }
     table
 };
+
+/// Combine one chunk of random bytes into a big-endian word. `refill_random`
+/// passes its `chunks_exact` slices straight through, so the exhaustive split
+/// test exercises exactly this code.
+#[inline(always)]
+fn random_chunk_word(chunk: &[u8]) -> u32 {
+    // Written out by index (not folded over the slice) because this form's
+    // codegen is the one that was benchmarked.
+    const _: () = assert!(RAW_BYTES_PER_CHUNK == 3);
+    u32::from_be_bytes([0, chunk[0], chunk[1], chunk[2]])
+}
+
+/// Extract the `index`-th 6-bit candidate (0 = most significant) from a
+/// chunk word. The fields are disjoint, so each is 0-63; the caller
+/// rejects values >= 58.
+#[inline(always)]
+fn random_candidate(word: u32, index: usize) -> u8 {
+    let shift = (CANDIDATES_PER_CHUNK - 1 - index) as u32 * BITS_PER_CANDIDATE;
+    ((word >> shift) & CANDIDATE_MASK) as u8
+}
 
 /// Pack 8 timestamp indices into bits 127..80 of a `u128`.
 ///
@@ -846,18 +881,22 @@ impl IdGenerator {
         // Lazy allocation: buffers start empty and are sized on first refill,
         // so a generator that is constructed but never used pays no buffer cost.
         if self.raw_buffer.is_empty() {
-            self.raw_buffer = vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice();
+            self.raw_buffer = vec![0u8; RAW_BATCH_SIZE].into_boxed_slice();
             self.random_buffer = vec![0u8; RANDOM_BATCH_SIZE].into_boxed_slice();
         }
         self.rng.fill_bytes(&mut self.raw_buffer);
         let mut count = 0;
-        for &byte in &*self.raw_buffer {
-            let value = byte & 0x3F;
-            // Branchless: always write, only advance count when valid.
-            // Avoids branch mispredictions (~9.4% reject rate).
-            // Safe because count <= loop iteration < RANDOM_BATCH_SIZE.
-            self.random_buffer[count] = value;
-            count += (value < BASE_USIZE as u8) as usize;
+        for chunk in self.raw_buffer.chunks_exact(RAW_BYTES_PER_CHUNK) {
+            let word = random_chunk_word(chunk);
+            for index in 0..CANDIDATES_PER_CHUNK {
+                let value = random_candidate(word, index);
+                // Branchless: always write, only advance count when valid.
+                // Avoids branch mispredictions (~9.4% reject rate).
+                // In bounds because count never exceeds the number of
+                // candidates examined so far (< RANDOM_BATCH_SIZE).
+                self.random_buffer[count] = value;
+                count += (value < BASE_USIZE as u8) as usize;
+            }
         }
         self.random_count = count;
         self.random_position = 0;
@@ -958,6 +997,15 @@ impl IdGenerator {
     /// Trigger carry propagation (test access).
     pub fn increment_carry_test(&mut self) {
         self.increment_carry();
+    }
+
+    /// Split 3 random bytes into 4 6-bit candidates exactly as
+    /// `refill_random` does (test access).
+    pub fn split_random_chunk_test(
+        chunk: [u8; RAW_BYTES_PER_CHUNK],
+    ) -> [u8; CANDIDATES_PER_CHUNK] {
+        let word = random_chunk_word(&chunk);
+        core::array::from_fn(|index| random_candidate(word, index))
     }
 
     /// Refill the random buffer (test access).

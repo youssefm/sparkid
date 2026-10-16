@@ -57,20 +57,20 @@ rust/        # Rust crate (crates.io: sparkid)
 
 Tests cover: ID format, timestamp encoding, counter monotonicity, carry propagation, uniqueness, cross-ms sortability, clock regression, random tail uniformity/bias, rejection sampling, thread safety, fork safety, and public API.
 
-## Algorithm (all implementations are identical)
+## Algorithm (identical ID format and distribution across implementations)
 
 IDs are 21-char fixed-length Base58 strings: `[8 timestamp][6 counter][7 random]`
 
 - **Timestamp**: milliseconds since epoch, Base58-encoded big-endian
 - **Counter**: randomly seeded each new millisecond, incremented per-ID within same ms
-- **Random tail**: cryptographically random bytes, rejection-sampled to Base58
+- **Random tail**: cryptographically random bytes, rejection-sampled to Base58. How bytes become 6-bit candidates is a per-language performance choice: JS uses 1 byte per candidate (low 6 bits); Rust (and Python, which wraps it) splits each 3 bytes into 4 candidates. Both yield uniform, independent indices.
 
 Base58 alphabet: `123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz`
 
 ## Invariants — do not break
 
 1. **Monotonicity**: IDs from a single generator instance must be strictly increasing (lexicographic) within the same millisecond and across milliseconds
-2. **No modulo bias**: Random bytes are rejection-sampled (mask to 6 bits, discard >=58) — never use modulo
+2. **No modulo bias**: Random 6-bit candidates are rejection-sampled (take 6 bits, discard >=58) — never use modulo
 3. **Counter overflow**: When all 6 counter chars are maxed, bump timestamp forward 1ms and reseed — never wrap
 4. **Thread safety (Python)**: `generate_id()` uses `threading.local` for per-thread generators; `IdGenerator` instances are NOT thread-safe
 5. **Thread safety (Rust)**: `SparkId::new()` uses `thread_local!` for per-thread generators; `IdGenerator` instances require `&mut self` (enforced by borrow checker)

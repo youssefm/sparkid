@@ -31,6 +31,13 @@ effect being measured. Lessons that shaped how results below were judged:
   calls every variant from one shared benchmark loop lets TurboFan inline them
   into that loop and compile them differently from standalone code. This made
   `+(bool)` look ~1.5x slower than it really is (see the ternary entry below).
+- **Check machine load before and during a run.** Other processes (another
+  session's browser or node workloads) inflated Criterion timings by 20–40%
+  mid-run while load average sat at 8–11. Discard any round taken under load;
+  `sysctl -n vm.loadavg` is a cheap gate.
+- **Check the disassembly before attributing a result to codegen.** An earlier
+  entry blamed lost auto-vectorization for a regression in a loop that was
+  never vectorized (see the buffer-merge entry below).
 - **Memory changes are judged on bytes, not throughput.** They show up as
   "neutral" on a throughput benchmark by design; kept or rejected on allocation
   size and code clarity instead.
@@ -39,7 +46,9 @@ effect being measured. Lessons that shaped how results below were judged:
 
 | Experiment | Lang | Measured result | Root cause |
 | --- | --- | --- | --- |
-| Merge raw + sampled random buffers | Rust | −2% to −8% | Aliasing blocks LLVM auto-vectorization |
+| Merge raw + sampled random buffers | Rust | −2% to −8% | Unknown — the vectorization explanation was wrong (loop is scalar) |
+| Prefix-sum compaction in `refill_random` | Rust | Refill 3–6% slower (one-shot) | Not diagnosed; shorter `count` chain did not pay off |
+| Bind `random_buffer` to a local in `refill_random` | Rust | Neutral on refill (one-shot) | Removes per-store reloads, but they were not the bottleneck |
 | `RANDOM_BATCH_SIZE` 16384 → 8192 | Rust | Throughput-neutral, **broke a test** | Hardcoded yield-ratio assertion; marginal memory gain |
 | Single `fromCharCode(21)` emit, prefix kept as string | JS | −30% | `charCodeAt` on a cons-string prefix is not O(1) |
 | Full buffer rewrite (prefix as `Uint8Array`) | JS | −16% | Destroys per-millisecond prefix amortization |
@@ -49,6 +58,11 @@ effect being measured. Lessons that shaped how results below were judged:
 
 ### Rust — merge `raw_buffer` and `random_buffer`
 
+> **Predates the 3-bytes → 4-candidates split.** This entry describes the old
+> one-byte-per-candidate refill (16 KB raw buffer). Its in-place premise no
+> longer holds: chunk *k* reads bytes 3k..3k+2 but can write up to index 4k+3,
+> so writes outrun reads and a naive in-place merge would corrupt unread input.
+
 **Idea.** `refill_random` reads raw RNG bytes from one 16 KB buffer and writes
 rejection-sampled survivors into a second. Because the write index (`count`)
 never exceeds the read index (`i`), compaction is safe in place — collapse to a
@@ -57,15 +71,70 @@ single buffer and halve per-generator memory (32 KB → 16 KB).
 **Result.** Regressed every benchmark: `next_id` +2.1%, `SparkId::new` +1.9%,
 webserver +7.6%.
 
-**Why.** Two separate buffers let LLVM prove the read stream and write stream do
-not alias, so it vectorizes the mask-and-compact loop. One buffer creates a
-read-after-write hazard on the same memory, which blocks vectorization in the
-`#[cold]` refill. The webserver path (most refills) paid the most. A 16 KB
-saving is not worth a 2–8% throughput hit.
+**Why — correction.** This entry originally said two separate buffers let LLVM
+vectorize the mask-and-compact loop and one buffer blocked it. That is wrong.
+Disassembly of the two-buffer build (arm64, rustc 1.98, `lto = true`,
+`codegen-units = 1`) shows a scalar loop that handles one byte per
+iteration: `ldrb` / `and #0x3f` / `strb` / `cmp #58` / `cinc`. It has no
+data-dependent branch (only the bounds check and loop back-edge) and contains
+no NEON instructions. Nothing else in `refill_random`
+uses NEON either, including rand's inlined ChaCha12 core. A stream compaction
+whose write index depends on the data is not something LLVM auto-vectorizes, so
+the two-buffer version had no vectorization to lose. The regression's real
+cause was not re-measured. Whatever it was, a 16 KB saving is not worth a 2–8%
+throughput hit, so the rejection stands. If revisited, diff the disassembly of
+both variants before explaining the result.
+
+### Rust — prefix-sum compaction in `refill_random`
+
+**How measured.** An unpublished Criterion microbench calling
+`refill_random_test()` in a loop (via `test-internals`), plus `fill_bytes` of a
+same-sized buffer alone to split RNG from compaction cost. Apple Silicon
+(arm64), rustc 1.98. Each variant ran once, sequentially, not interleaved, so
+small differences here are one-shot numbers, not A/B-confirmed. The same
+applies to the next entry.
+
+**Context.** `refill_random` packs 3 RNG bytes into 4 six-bit candidates. On
+arm64, `StdRng::fill_bytes` of the 12,288 raw bytes takes ~7.8 µs and
+compaction into ~14,850 survivors takes ~4.3 µs (~0.26 ns, about one cycle, per
+candidate). That looks bound by the serial `count += valid` chain: each `cinc`
+waits for the previous one.
+
+**Idea.** Per 3-byte chunk, compute the in-chunk offsets
+(`offset_1 = valid_0`, `offset_2 = offset_1 + valid_1`, ...) independently of
+`count`. Then store all four candidates at `count + offset_k` and advance
+`count` once per chunk, aiming for a loop-carried chain of one add per 4
+candidates (the compiled code got it down to two).
+
+**Result.** Slower: refill 12.78 µs (12.49 µs with the buffer bound to a
+local) vs 12.05–12.10 µs for the plain per-candidate `cinc` loop.
+
+**Why — not diagnosed.** Disassembly of the variant shows what the idea
+intended: the same four bounds checks per chunk as the baseline, and the
+`count` chain cut to two adds per chunk (offsets come from `cset`/`cinc` off
+that chain). It still measured slower, so the `count` chain was evidently not
+the binding constraint; the actual bottleneck was not identified. Since the
+gap is a one-shot 3–6%, read this as "no gain", not as a confirmed
+regression. A real gain would probably need explicit NEON compaction
+(table-lookup compress), which is a lot of arch-specific `unsafe` code for at
+most ~2 ns/ID.
+
+### Rust — bind `random_buffer` to a local in `refill_random`
+
+**Idea.** The compaction loop writes through `self.random_buffer[count]`.
+Because a `u8` store may alias `self`, LLVM reloads the buffer pointer and
+length before every store. Binding `let random_buffer = &mut *self.random_buffer`
+before the loop lets it hoist both.
+
+**Result.** Neutral: refill 12.10 µs vs 12.06 µs (one-shot, see the
+prefix-sum entry for how this was measured).
+
+**Why.** The reloads hit L1 and were not the bottleneck, so removing them
+changes nothing measurable.
 
 ### Rust — shrink `RANDOM_BATCH_SIZE` 16384 → 8192
 
-**Idea.** Halve the random batch buffer. 8192 bytes still yields ~1060 IDs per
+**Idea.** Halve the random batch buffer. 8192 candidates still yields ~1060 IDs per
 refill; refill is `#[cold]` and amortized, so throughput should be flat while
 memory halves.
 
@@ -117,8 +186,10 @@ matched to V8. A micro-benchmark that does not replicate the caller's state
 **Idea.** Same in-place compaction as the Rust attempt, applied to
 `refillRandom`'s two module-global buffers.
 
-**Result.** Neutral — the two A/B distributions overlapped (noise). Unlike Rust,
-JIT'd JS does not auto-vectorize the compaction loop, so aliasing blocks nothing.
+**Result.** Neutral — the two A/B distributions overlapped (noise). The
+compaction loop is not vectorized in JS (and, despite what the Rust entry once
+claimed, not in Rust either), so there was no vectorization for aliasing to
+block.
 
 **Why rejected.** The only benefit is a one-time 16 KB saving (buffers are
 process-global, allocated once), and it aliases two conceptually distinct

@@ -673,6 +673,33 @@ fn test_no_modulo_bias() {
     );
 }
 
+#[test]
+fn test_random_chunk_split_is_bijective() {
+    // Several candidates are carved out of each group of 3 RNG bytes, so
+    // per-character uniformity alone would not catch two candidates sharing
+    // bits. Exhaustively check that the 4 fields reassemble every 24-bit
+    // input exactly: disjoint fields covering all bits means each candidate
+    // is uniform over 0-63 and independent of its siblings.
+    const BITS_PER_CANDIDATE: u32 = 6;
+    const CANDIDATES_PER_CHUNK: u32 = 4;
+    const CANDIDATE_LIMIT: u8 = 1 << BITS_PER_CANDIDATE;
+    const WORD_COUNT: u32 = 1 << (BITS_PER_CANDIDATE * CANDIDATES_PER_CHUNK);
+    for word in 0..WORD_COUNT {
+        let [_, high, middle, low] = word.to_be_bytes();
+        let candidates = IdGenerator::split_random_chunk_test([high, middle, low]);
+        let reassembled = candidates
+            .iter()
+            .fold(0u32, |accumulator, &candidate| {
+                assert!(
+                    candidate < CANDIDATE_LIMIT,
+                    "candidate {candidate} exceeds {BITS_PER_CANDIDATE} bits"
+                );
+                (accumulator << BITS_PER_CANDIDATE) | candidate as u32
+            });
+        assert_eq!(reassembled, word, "split of {word:#08x} lost or duplicated bits");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Rejection sampling internals
 // ---------------------------------------------------------------------------
