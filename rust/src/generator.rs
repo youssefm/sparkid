@@ -442,7 +442,7 @@ impl fmt::Display for SparkId {
 
 impl fmt::Debug for SparkId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SparkId({})", &self.as_str())
+        write!(f, "SparkId({})", self.as_str())
     }
 }
 
