@@ -1,18 +1,13 @@
 import { defineConfig } from "tsup";
-import path from "path";
 
 export default defineConfig({
   entry: ["src/index.ts", "src/binary.ts"],
   format: ["cjs", "esm"],
   dts: true,
+  // esbuild already emits map `sources` relative to the map file (e.g.
+  // "../src/index.ts"), so no local paths leak and they resolve to the shipped
+  // src/. Don't set `sourceRoot`: consumers prepend it to those paths, so stack
+  // traces and debuggers point at nonexistent files (e.g. "dist/..../src/").
   sourcemap: true,
   clean: true,
-  esbuildOptions(options) {
-    // Rewrite absolute source paths to relative so local filesystem
-    // paths don't leak into the published npm package.
-    options.sourceRoot = path.relative(
-      path.resolve(__dirname, "dist"),
-      path.resolve(__dirname),
-    );
-  },
 });
