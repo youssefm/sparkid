@@ -126,6 +126,9 @@ function encodeTimestamp(timestamp: number): void {
  * Decodes the last character to a Base58 index, adds delta, and replaces
  * the character. If the result carries (>= 58), falls back to full
  * re-encode since carry is rare (~1/58 for delta=1).
+ *
+ * Throws RangeError past MAX_TIMESTAMP before mutating any state.
+ * Does not update `timestampCacheMs`; the caller does that after success.
  */
 function incrementEncodedTimestamp(delta: number): void {
   const newIndex = BASE58_INDEX[timestampCachePrefix.charCodeAt(7)] + delta;
@@ -144,7 +147,7 @@ function incrementEncodedTimestamp(delta: number): void {
   }
   if (carryPosition < 0) {
     throw new RangeError(
-      `Timestamp out of range: ${timestampCacheMs} (valid range: 0 to ${MAX_TIMESTAMP})`,
+      `Timestamp out of range: ${timestampCacheMs + delta} (valid range: 0 to ${MAX_TIMESTAMP})`,
     );
   }
   // Build result once: unchanged prefix + successor + wrapped zeros + remainder.
@@ -240,8 +243,11 @@ function _generateIdAt(ms: number): string {
     if (delta <= BASE) {
       // Fast path: increment the encoded timestamp directly,
       // avoiding 8 Math.trunc/modulo operations.
-      timestampCacheMs = ms;
       incrementEncodedTimestamp(delta);
+      // Commit only after the range check above: if it throws, state must be
+      // untouched so a retry with the same input throws again instead of
+      // taking the same-millisecond branch and emitting a stale ID.
+      timestampCacheMs = ms;
     } else {
       // Large jump or first call: full re-encode.
       encodeTimestamp(ms);

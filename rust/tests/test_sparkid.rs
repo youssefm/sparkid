@@ -353,6 +353,69 @@ fn test_counter_overflow_at_max_timestamp_panics() {
     gen.increment_carry_test();
 }
 
+// A panic past MAX_TIMESTAMP must leave the generator untouched, so the same
+// input panics again on retry (never a stale or regressed ID). The generator
+// stays reachable after a panic via catch_unwind, a `thread_local!`, or PyO3's
+// PanicException.
+
+/// Asserts that `next_id_at` panics with the out-of-range message for `MAX_TIMESTAMP + 1`.
+fn assert_next_id_at_panics_past_max(gen: &mut IdGenerator, timestamp_ms: u64) {
+    let payload =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| gen.next_id_at(timestamp_ms)))
+            .expect_err("expected a panic");
+    let message = payload
+        .downcast_ref::<String>()
+        .expect("panic payload should be a formatted String");
+    let expected = format!("Timestamp out of range: {} ", MAX_TIMESTAMP + 1);
+    assert!(message.starts_with(&expected), "unexpected panic message: {message}");
+}
+
+#[test]
+fn test_small_jump_past_max_panics_on_every_retry() {
+    let near_max = MAX_TIMESTAMP - 3;
+    let mut gen = IdGenerator::new();
+    let before = gen.next_id_at(near_max);
+    for _ in 0..3 {
+        assert_next_id_at_panics_past_max(&mut gen, MAX_TIMESTAMP + 1);
+    }
+    assert_eq!(gen.timestamp_cache_ms(), near_max);
+    let after = gen.next_id_at(near_max);
+    assert_eq!(after.timestamp_ms(), near_max);
+    assert!(after.as_str() > before.as_str());
+    // Force a counter-head carry, which rebuilds the prefix from the cached
+    // packed timestamp, to catch a partially-carried packed value.
+    gen.set_counter_head(&[0, 0, 0, 0, 0]);
+    gen.set_counter_tail(57);
+    assert_eq!(gen.next_id_at(near_max).timestamp_ms(), near_max);
+}
+
+#[test]
+fn test_large_jump_past_max_panics_on_every_retry() {
+    let mut gen = IdGenerator::new();
+    let before = gen.next_id_at(1_000);
+    for _ in 0..3 {
+        assert_next_id_at_panics_past_max(&mut gen, MAX_TIMESTAMP + 1);
+    }
+    assert_eq!(gen.timestamp_cache_ms(), 1_000);
+    let after = gen.next_id_at(2_000);
+    assert_eq!(after.timestamp_ms(), 2_000);
+    assert!(after.as_str() > before.as_str());
+}
+
+#[test]
+fn test_counter_overflow_at_max_timestamp_panics_on_every_retry() {
+    let mut gen = IdGenerator::new();
+    gen.next_id_at(MAX_TIMESTAMP);
+    gen.set_counter_head(&[57, 57, 57, 57, 57]);
+    gen.set_counter_tail(57);
+    for _ in 0..3 {
+        assert_next_id_at_panics_past_max(&mut gen, MAX_TIMESTAMP);
+    }
+    assert_eq!(gen.timestamp_cache_ms(), MAX_TIMESTAMP);
+    assert_eq!(gen.counter_head_indices(), &[57, 57, 57, 57, 57]);
+    assert_eq!(gen.counter_tail(), 57);
+}
+
 // ---------------------------------------------------------------------------
 // Counter monotonicity
 // ---------------------------------------------------------------------------

@@ -771,7 +771,6 @@ impl IdGenerator {
     fn prepare_next(&mut self, timestamp: u64) -> usize {
         if timestamp > self.timestamp_cache_ms {
             let delta = timestamp - self.timestamp_cache_ms;
-            self.timestamp_cache_ms = timestamp;
             if delta <= BASE {
                 // Fast path: increment the packed timestamp directly,
                 // avoiding 8 divisions by 58.
@@ -780,6 +779,10 @@ impl IdGenerator {
                 // Large jump or first call: full re-encode.
                 self.encode_timestamp(timestamp);
             }
+            // Commit only after the encoders have range-checked: if they
+            // panic, the generator must be left untouched so a retry with
+            // the same input panics again instead of emitting a stale ID.
+            self.timestamp_cache_ms = timestamp;
             self.seed_counter();
         } else {
             // Same millisecond (or clock went backward): increment counter tail.
@@ -833,6 +836,9 @@ impl IdGenerator {
     /// packed in `cached_timestamp_packed`, avoiding the 8 div/mod operations
     /// of a full re-encode. For delta ≤ 58, the initial addition produces
     /// at most carry=1 into the next higher digit.
+    ///
+    /// Panics if the result exceeds `MAX_TIMESTAMP`, leaving
+    /// `cached_timestamp_packed` unchanged (the carry is computed on a copy).
     #[inline(always)]
     fn increment_encoded_timestamp(&mut self, delta: u64) {
         // Field 7 (least significant timestamp digit) is at bits 85..80.
@@ -848,22 +854,23 @@ impl IdGenerator {
         }
 
         // Carry path: set field 7 to remainder, propagate carry=1 upward.
+        // Work on a local copy and store it only once the carry is absorbed.
         let remainder = delta - headroom - 1;
         debug_assert!(remainder < BASE, "delta must be <= 58");
-        self.cached_timestamp_packed = (self.cached_timestamp_packed & !(FIELD_MASK << FIELD_7_SHIFT))
+        let mut packed = (self.cached_timestamp_packed & !(FIELD_MASK << FIELD_7_SHIFT))
             | ((remainder as u128) << FIELD_7_SHIFT);
 
         // Propagate carry=1 through fields 6..0 (shifts 86, 92, ..., 122).
         let mut shift = FIELD_7_SHIFT + 6;
         loop {
-            let field = ((self.cached_timestamp_packed >> shift) & FIELD_MASK) as u64;
+            let field = ((packed >> shift) & FIELD_MASK) as u64;
             if field < MAX_INDEX as u64 {
                 // Room to absorb carry: increment in place.
-                self.cached_timestamp_packed += 1u128 << shift;
+                self.cached_timestamp_packed = packed + (1u128 << shift);
                 return;
             }
             // field == 57: wraps to 0, carry continues.
-            self.cached_timestamp_packed &= !(FIELD_MASK << shift);
+            packed &= !(FIELD_MASK << shift);
             if shift >= 122 {
                 break;
             }
@@ -872,7 +879,7 @@ impl IdGenerator {
         // All 8 timestamp digits overflowed — timestamp exceeded MAX_TIMESTAMP.
         panic!(
             "Timestamp out of range: {} (valid range: 0 to {MAX_TIMESTAMP})",
-            self.timestamp_cache_ms
+            self.timestamp_cache_ms + delta
         );
     }
 
@@ -935,8 +942,17 @@ impl IdGenerator {
             self.counter_head[i] = FIRST_INDEX;
         }
         // Full overflow: bump timestamp, reseed.
-        self.timestamp_cache_ms += 1;
-        self.encode_timestamp(self.timestamp_cache_ms);
+        let next_timestamp = self.timestamp_cache_ms + 1;
+        if next_timestamp > MAX_TIMESTAMP {
+            // encode_timestamp is about to panic. Undo the wrap above (every
+            // head index was MAX_INDEX to get here) so the generator is left
+            // unchanged and a retry panics again rather than emitting a
+            // regressed counter. Wrapping in place keeps the common carry
+            // path free of a stack frame and memset.
+            self.counter_head = [MAX_INDEX; COUNTER_HEAD_CHAR_COUNT];
+        }
+        self.encode_timestamp(next_timestamp);
+        self.timestamp_cache_ms = next_timestamp;
         self.seed_counter();
     }
 }

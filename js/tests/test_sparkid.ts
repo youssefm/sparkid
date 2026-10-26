@@ -721,6 +721,23 @@ describe("generateIdAt", () => {
 // ---------------------------------------------------------------------------
 
 describe("generateIdAt MAX_TIMESTAMP boundary", () => {
+  it("small forward jump past MAX_TIMESTAMP throws on every retry and leaves state intact", () => {
+    // delta <= BASE takes the incremental-encode fast path. A failed call
+    // must not advance the cached timestamp, or the retry would take the
+    // same-millisecond branch and return an ID stamped MAX_TIMESTAMP - 3.
+    const nearMax = MAX_TIMESTAMP - 3;
+    const before = generateIdAt(new Date(nearMax));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      assert.throws(() => generateIdAt(new Date(MAX_TIMESTAMP + 1)), {
+        name: "RangeError",
+        message: new RegExp(`^Timestamp out of range: ${MAX_TIMESTAMP + 1} `),
+      });
+    }
+    const after = generateIdAt(new Date(nearMax));
+    assert.equal(extractTimestamp(after).getTime(), nearMax);
+    assert.ok(after > before, "monotonicity preserved across failed calls");
+  });
+
   it("MAX_TIMESTAMP succeeds and round-trips", () => {
     const id = generateIdAt(new Date(MAX_TIMESTAMP));
     assert.equal(id.length, 21);
