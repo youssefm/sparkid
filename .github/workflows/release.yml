@@ -268,35 +268,11 @@ jobs:
           npm publish npm-tarball/*.tgz --access public --ignore-scripts
           echo "### ✅ Published sparkid@$NEW_VERSION to npm" >> "$GITHUB_STEP_SUMMARY"
 
-  # ── Check if PyPI version already exists (skip builds if so) ────
-  check-pypi:
-    needs: prepare
-    runs-on: ubuntu-latest
-    permissions: {}
-    outputs:
-      already_published: ${{ steps.check.outputs.already_published }}
-    steps:
-      - name: Check if version already published to PyPI
-        id: check
-        env:
-          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
-        run: |
-          http_code=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/sparkid/$NEW_VERSION/json")
-          if [ "$http_code" = "200" ]; then
-            echo "already_published=true" >> "$GITHUB_OUTPUT"
-            echo "⏭️ sparkid $NEW_VERSION already exists on PyPI — skipping wheel builds"
-            echo "### ⏭️ PyPI: already published — skipping builds" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "already_published=false" >> "$GITHUB_OUTPUT"
-            echo "📦 sparkid $NEW_VERSION not found on PyPI (HTTP $http_code) — will build and publish"
-          fi
-
   # ── Build Python wheels (parallel, multi-platform) ──────────────
 
   # Linux glibc (manylinux)
   build-python-linux:
-    needs: [prepare, check-pypi]
-    if: needs.check-pypi.outputs.already_published == 'false'
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -322,11 +298,11 @@ jobs:
         with:
           name: wheels-linux-${{ matrix.target }}
           path: python/dist
+          if-no-files-found: error
 
   # Linux musl (Alpine, distroless)
   build-python-musllinux:
-    needs: [prepare, check-pypi]
-    if: needs.check-pypi.outputs.already_published == 'false'
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -356,11 +332,11 @@ jobs:
         with:
           name: wheels-musllinux-${{ matrix.target }}
           path: python/dist
+          if-no-files-found: error
 
   # macOS
   build-python-macos:
-    needs: [prepare, check-pypi]
-    if: needs.check-pypi.outputs.already_published == 'false'
+    needs: prepare
     runs-on: macos-latest
     permissions:
       contents: read
@@ -391,11 +367,11 @@ jobs:
         with:
           name: wheels-macos
           path: python/dist
+          if-no-files-found: error
 
   # Windows
   build-python-windows:
-    needs: [prepare, check-pypi]
-    if: needs.check-pypi.outputs.already_published == 'false'
+    needs: prepare
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -432,11 +408,11 @@ jobs:
         with:
           name: wheels-windows-${{ matrix.target }}
           path: python/dist
+          if-no-files-found: error
 
   # Source distribution
   build-python-sdist:
-    needs: [prepare, check-pypi]
-    if: needs.check-pypi.outputs.already_published == 'false'
+    needs: prepare
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -455,11 +431,13 @@ jobs:
         with:
           name: wheels-sdist
           path: python/dist
+          if-no-files-found: error
 
   # ── Publish to PyPI (after wheels are built) ───────────────────
+  # Wheels are always built, even on retry: PyPI uploads are per-file, so the
+  # version can exist with only some files (a failed `uv publish`).
   publish-pypi:
-    needs: [prepare, check-pypi, build-python-linux, build-python-musllinux, build-python-macos, build-python-windows, build-python-sdist]
-    if: needs.check-pypi.outputs.already_published == 'false'
+    needs: [prepare, build-python-linux, build-python-musllinux, build-python-macos, build-python-windows, build-python-sdist]
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # PyPI trusted publishing
@@ -474,10 +452,43 @@ jobs:
           merge-multiple: true
           path: dist
 
+      # Skip by filename, not by content hash (`uv publish --check-url`):
+      # rebuilt wheels are not byte-reproducible across runs (toolchain and
+      # image drift), and PyPI rejects a same-named file with different content.
+      # A file already on PyPI was built from this same tag, so leave PyPI's copy.
+      # The JSON API is CDN-cached (~15 min): if a just-uploaded file is missing
+      # from it, `uv publish` fails with "File already exists" — rerun retry.
+      - name: Drop files already on PyPI
+        env:
+          NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
+        run: |
+          # download-artifact succeeds on zero matches; without this, a run with
+          # no artifacts would look like "everything already published".
+          if ! compgen -G 'dist/*' > /dev/null; then
+            echo "::error::No distributions downloaded"
+            exit 1
+          fi
+          http_code=$(curl -s -o pypi.json -w '%{http_code}' "https://pypi.org/pypi/sparkid/$NEW_VERSION/json")
+          case "$http_code" in
+            200) jq -r '.urls[].filename' pypi.json > existing.txt ;;
+            404) : > existing.txt ;;
+            *) echo "::error::PyPI lookup failed (HTTP $http_code)"; exit 1 ;;
+          esac
+          while read -r filename; do
+            if [ -f "dist/$filename" ]; then
+              echo "⏭️ $filename already on PyPI"
+              rm "dist/$filename"
+            fi
+          done < existing.txt
+
       - name: Publish to PyPI
         env:
           NEW_VERSION: ${{ needs.prepare.outputs.new_version }}
         run: |
+          if ! compgen -G 'dist/*' > /dev/null; then
+            echo "### ⏭️ PyPI: all files already published" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           uv publish dist/*
           echo "### ✅ Published sparkid $NEW_VERSION to PyPI" >> "$GITHUB_STEP_SUMMARY"
 
