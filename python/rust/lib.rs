@@ -12,26 +12,32 @@ use sparkid::{IdGenerator, SparkId};
 /// calls `SparkId::encode_utf8` to fill the buffer in place — no intermediate
 /// copy. On PyPy, falls back to `PyString::new` (PyPy lacks the CPython
 /// unicode internals API).
+///
+/// Returns `Err(MemoryError)` if CPython cannot allocate the string.
 #[cfg(not(PyPy))]
 #[inline(always)]
-fn sparkid_to_pystring<'py>(py: Python<'py>, id: SparkId) -> Bound<'py, PyString> {
+fn sparkid_to_pystring<'py>(py: Python<'py>, id: SparkId) -> PyResult<Bound<'py, PyString>> {
     use pyo3::ffi;
     const ID_LENGTH: isize = 21;
     const ID_LENGTH_USIZE: usize = 21;
     unsafe {
         let ptr = ffi::PyUnicode_New(ID_LENGTH, 127);
-        debug_assert!(!ptr.is_null());
-        let data = ffi::PyUnicode_DATA(ptr) as *mut [u8; ID_LENGTH_USIZE];
+        // Must be a real check, not a debug_assert: PyUnicode_New returns NULL
+        // (with MemoryError set) on allocation failure, and writing through
+        // PyUnicode_DATA(NULL) would be UB. This turns NULL into Err(PyErr)
+        // before the pointer is dereferenced.
+        let string = Bound::from_owned_ptr_or_err(py, ptr)?;
+        let data = ffi::PyUnicode_DATA(string.as_ptr()) as *mut [u8; ID_LENGTH_USIZE];
         id.encode_utf8(&mut *data);
-        Bound::from_owned_ptr(py, ptr).downcast_into_unchecked()
+        Ok(string.downcast_into_unchecked())
     }
 }
 
 #[cfg(PyPy)]
 #[inline(always)]
-fn sparkid_to_pystring<'py>(py: Python<'py>, id: SparkId) -> Bound<'py, PyString> {
+fn sparkid_to_pystring<'py>(py: Python<'py>, id: SparkId) -> PyResult<Bound<'py, PyString>> {
     let id_str = id.as_str();
-    PyString::new(py, &*id_str)
+    Ok(PyString::new(py, &*id_str))
 }
 
 /// Maximum encodable timestamp: 58^8 - 1
@@ -67,7 +73,7 @@ impl PyIdGenerator {
         }
     }
 
-    fn __call__<'py>(&mut self, py: Python<'py>) -> Bound<'py, PyString> {
+    fn __call__<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyString>> {
         let id = self.inner.next_id();
         sparkid_to_pystring(py, id)
     }
@@ -80,7 +86,7 @@ impl PyIdGenerator {
     fn generate_at<'py>(slf: &Bound<'py, Self>, timestamp_ms: i64) -> PyResult<Bound<'py, PyString>> {
         let ts = validate_timestamp(timestamp_ms)?;
         let id = slf.try_borrow_mut()?.inner.next_id_at(ts);
-        Ok(sparkid_to_pystring(slf.py(), id))
+        sparkid_to_pystring(slf.py(), id)
     }
 
     fn reset(&mut self) {
@@ -89,7 +95,7 @@ impl PyIdGenerator {
 }
 
 #[pyfunction]
-fn generate_id(py: Python<'_>) -> Bound<'_, PyString> {
+fn generate_id(py: Python<'_>) -> PyResult<Bound<'_, PyString>> {
     LOCAL_GEN.with(|gen| {
         // SAFETY: thread_local guarantees single-thread access; no re-entrant calls.
         let gen = unsafe { &mut *gen.get() };
@@ -105,7 +111,7 @@ fn generate_id_at(py: Python<'_>, timestamp_ms: i64) -> PyResult<Bound<'_, PyStr
         // SAFETY: thread_local guarantees single-thread access; no re-entrant calls.
         let gen = unsafe { &mut *gen.get() };
         let id = gen.next_id_at(ts);
-        Ok(sparkid_to_pystring(py, id))
+        sparkid_to_pystring(py, id)
     })
 }
 
@@ -139,7 +145,7 @@ fn from_bytes<'py>(py: Python<'py>, data: &[u8]) -> PyResult<Bound<'py, PyString
     let spark_id = SparkId::from_bytes(arr).map_err(|e| {
         pyo3::exceptions::PyValueError::new_err(e.to_string())
     })?;
-    Ok(sparkid_to_pystring(py, spark_id))
+    sparkid_to_pystring(py, spark_id)
 }
 
 #[pyfunction]
@@ -159,7 +165,9 @@ fn reset_thread_local() {
 /// - No generator borrow (of `LOCAL_GEN` or of an instance) is held while
 ///   Python code runs: arguments are extracted before borrowing (see
 ///   `generate_at`), and the borrowed sections only run Rust code plus
-///   `PyUnicode_New`, which runs no Python.
+///   `PyUnicode_New` and, if it fails, fetching its `MemoryError`. Neither
+///   runs Python (pyo3's `PyErr::take` only calls `str()` on a
+///   `PanicException`).
 /// - `PyIdGenerator` methods borrow the instance mutably through PyO3's
 ///   atomic borrow flag, which turns concurrent use of one instance into
 ///   `RuntimeError` ("Already borrowed") rather than a data race. That fits
