@@ -72,10 +72,15 @@ impl PyIdGenerator {
         sparkid_to_pystring(py, id)
     }
 
-    fn generate_at<'py>(&mut self, py: Python<'py>, timestamp_ms: i64) -> PyResult<Bound<'py, PyString>> {
+    // Takes `&Bound<Self>` rather than `&mut self` so the instance is borrowed
+    // only after `timestamp_ms` is extracted. With `&mut self`, PyO3 borrows
+    // first, and extraction can run arbitrary Python (`__index__`) while the
+    // borrow is held: a re-entrant call would get "Already borrowed", and a
+    // fork from there would leave the child's `reset()` unable to borrow.
+    fn generate_at<'py>(slf: &Bound<'py, Self>, timestamp_ms: i64) -> PyResult<Bound<'py, PyString>> {
         let ts = validate_timestamp(timestamp_ms)?;
-        let id = self.inner.next_id_at(ts);
-        Ok(sparkid_to_pystring(py, id))
+        let id = slf.try_borrow_mut()?.inner.next_id_at(ts);
+        Ok(sparkid_to_pystring(slf.py(), id))
     }
 
     fn reset(&mut self) {
@@ -146,7 +151,25 @@ fn reset_thread_local() {
     });
 }
 
-#[pymodule]
+/// `gil_used = false`: without it, PyO3 defaults to `true` and importing this
+/// module re-enables the GIL process-wide on free-threaded CPython (3.13t+).
+/// Running without the GIL is sound here because:
+/// - `LOCAL_GEN` is a Rust `thread_local!`, so it was never shared between
+///   threads; the GIL wasn't protecting it.
+/// - No generator borrow (of `LOCAL_GEN` or of an instance) is held while
+///   Python code runs: arguments are extracted before borrowing (see
+///   `generate_at`), and the borrowed sections only run Rust code plus
+///   `PyUnicode_New`, which runs no Python.
+/// - `PyIdGenerator` methods borrow the instance mutably through PyO3's
+///   atomic borrow flag, which turns concurrent use of one instance into
+///   `RuntimeError` ("Already borrowed") rather than a data race. That fits
+///   the documented contract: an instance is not thread-safe, so lock it
+///   yourself if you share it.
+/// - Fork: CPython stops the world in `PyOS_BeforeFork`. An attached thread
+///   only pauses when it detaches or runs Python code, and neither happens
+///   while a borrow is held. So no instance borrow can be held at fork time,
+///   and the child's `reset()` loop cannot fail with "Already borrowed".
+#[pymodule(gil_used = false)]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyIdGenerator>()?;
     m.add_function(wrap_pyfunction!(generate_id, m)?)?;

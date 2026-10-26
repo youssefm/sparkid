@@ -1,6 +1,7 @@
 """sparkid - Fast, time-sortable, 21-char Base58 unique ID generator."""
 
 import os
+import sys
 import weakref
 
 from sparkid._native import (
@@ -50,7 +51,10 @@ class IdGenerator(_RustIdGenerator):
     monotonic ordering, protect a single shared instance with a lock.
     """
 
-    __slots__ = ("__weakref__",)
+    # _all_generators needs weakrefs. CPython needs the "__weakref__" slot for
+    # that; PyPy objects always support weakrefs and raises TypeError at import
+    # if the slot is declared.
+    __slots__ = () if sys.implementation.name == "pypy" else ("__weakref__",)
 
     def __init__(self) -> None:
         super().__init__()

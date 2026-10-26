@@ -1,6 +1,9 @@
 """Comprehensive tests for the sparkid ID generator."""
 
 import os
+import subprocess
+import sys
+import sysconfig
 import threading
 import time
 from collections import Counter
@@ -501,6 +504,84 @@ class TestThreadSafety:
 
         all_ids = [id_ for ids in results.values() for id_ in ids]
         assert len(set(all_ids)) == len(all_ids)
+
+    def test_shared_instance_contention_never_corrupts(self):
+        """Sharing one instance without a lock is unsupported. On free-threaded
+        builds, PyO3's borrow check may reject an overlapping call with
+        RuntimeError("Already borrowed"), but it must never yield duplicate or
+        out-of-order IDs."""
+        gen = IdGenerator()
+        results: list[list[str]] = []
+        errors: list[Exception] = []
+        thread_count = 4
+        ids_per_thread = 5000
+        # Start together so the calls actually overlap.
+        start_barrier = threading.Barrier(thread_count)
+
+        def worker() -> None:
+            ids: list[str] = []
+            start_barrier.wait()
+            for _ in range(ids_per_thread):
+                try:
+                    ids.append(gen())
+                except RuntimeError as e:
+                    if "Already borrowed" not in str(e):
+                        errors.append(e)
+                except Exception as e:
+                    errors.append(e)
+            results.append(ids)
+
+        threads = [threading.Thread(target=worker) for _ in range(thread_count)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        assert len(results) == thread_count
+        for ids in results:
+            assert all(ids[i] > ids[i - 1] for i in range(1, len(ids)))
+        all_ids = [id_ for ids in results for id_ in ids]
+        assert all_ids
+        assert len(set(all_ids)) == len(all_ids)
+        # The instance is left usable: no borrow is stuck.
+        assert gen() > max(all_ids)
+
+    def test_generate_at_extracts_timestamp_before_borrowing(self):
+        """Converting the timestamp can run Python code (__index__). The
+        instance must not be borrowed during that conversion, or a call (or a
+        fork-child reset) made from that code fails with "Already borrowed"."""
+        gen = IdGenerator()
+        # Ahead of the clock, so the inner gen() can't move the instance past it.
+        one_day_ms = 24 * 60 * 60 * 1000
+        timestamp_ms = int(time.time() * 1000) + one_day_ms
+        inner_ids: list[str] = []
+
+        class TimestampThatUsesGenerator:
+            def __index__(self) -> int:
+                inner_ids.append(gen())
+                return timestamp_ms
+
+        outer_id = gen.generate_at(TimestampThatUsesGenerator())  # type: ignore[arg-type]
+        assert len(inner_ids) == 1
+        assert extract_timestamp_ms(outer_id) == timestamp_ms
+
+
+@pytest.mark.skipif(
+    not sysconfig.get_config_var("Py_GIL_DISABLED"),
+    reason="requires a free-threaded CPython build",
+)
+def test_import_keeps_gil_disabled():
+    """The native module declares gil_used = false, so importing it must not
+    re-enable the GIL on free-threaded builds."""
+    code = (
+        "import sys, warnings\n"
+        "warnings.simplefilter('error')\n"
+        "import sparkid\n"
+        "assert not sys._is_gil_enabled()\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "PYTHON_GIL"}
+    subprocess.run([sys.executable, "-c", code], env=env, check=True)
 
 
 # ---------------------------------------------------------------------------
