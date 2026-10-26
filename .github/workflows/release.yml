@@ -1,8 +1,9 @@
 name: Release
 
 on:
+  # Note: workflow_dispatch ignores `branches:` filters — the main-only guard
+  # lives in the ci-check job below.
   workflow_dispatch:
-    branches: [main]
     inputs:
       mode:
         description: "Release mode"
@@ -21,16 +22,40 @@ permissions:
   id-token: write
 
 jobs:
-  # Gate: verify CI has already passed for this commit (wait up to 5 min if in progress)
+  # Gate: verify CI has already passed for the commit being released (wait up to 5 min if in progress)
   ci-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Verify CI passed for this commit
+        with:
+          fetch-depth: 0
+      - name: Verify CI passed for the commit being released
         env:
           GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
         run: |
-          sha=$(git rev-parse HEAD)
+          # Fail (not skip) so create-release's `!failure()` condition also stops it
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases must be dispatched from main (got $GITHUB_REF)"
+            exit 1
+          fi
+
+          if [ "$MODE" = "retry" ]; then
+            # Retry publishes the existing tag, not HEAD. The tag is either prepare's
+            # bump commit, which has no Test run (GITHUB_TOKEN pushes don't trigger
+            # workflows) and differs from its CI-gated parent only in version strings,
+            # or a commit the tag was moved to by hand to ship a fix (as with v2.1.0).
+            current=$(grep '"version"' js/package.json | head -1 | sed 's/.*"\([0-9]\+\.[0-9]\+\.[0-9]\+\)".*/\1/')
+            if ! sha=$(git rev-parse --verify --quiet "refs/tags/v$current^{commit}"); then
+              echo "::error::Retry failed — tag v$current does not exist"
+              exit 1
+            fi
+            if [ "$(git log -1 --format=%s "$sha")" = "chore: bump version to $current" ]; then
+              sha=$(git rev-parse "$sha^")
+            fi
+          else
+            sha=$(git rev-parse HEAD)
+          fi
           echo "Checking Test workflow status for $sha ..."
 
           for i in $(seq 1 30); do
@@ -144,11 +169,14 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" python/Cargo.toml
           sed -i "0,/^version = \".*\"/s//version = \"$NEW_VERSION\"/" rust/Cargo.toml
 
-          # Update lock files
-          cd js && npm install --package-lock-only && cd ..
-          cd python && uv lock && cd ..
-          cd python && cargo generate-lockfile && cd ..
-          cd rust && cargo generate-lockfile && cd ..
+          # Update lock files. Subshells, not `cd x && ... && cd ..`, because
+          # bash -e ignores a failure in the middle of an && chain.
+          (cd js && npm install --package-lock-only)
+          (cd python && uv lock)
+          # Bump only our own crates' versions; keep every other dependency pinned
+          # (generate-lockfile would re-resolve all deps to untested versions)
+          (cd python && cargo update --workspace)
+          (cd rust && cargo update --workspace)
 
           # Commit, tag, push
           git config user.name "github-actions[bot]"
