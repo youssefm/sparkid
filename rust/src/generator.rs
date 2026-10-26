@@ -667,13 +667,17 @@ mod serde_support {
 /// ```
 pub struct IdGenerator {
     timestamp_cache_ms: u64,
+    // False until the first seed. `timestamp_cache_ms` starts at 0, which is
+    // also a valid timestamp, so without this a first call at timestamp 0
+    // would look like the same millisecond and skip seeding the counter.
+    counter_seeded: bool,
     // Counter head indices (5 values, each 0-57). Used for carry propagation.
     counter_head: [u8; COUNTER_HEAD_CHAR_COUNT],
     // Counter tail — kept as separate field for fast increment
     counter_tail: u8,
     // Cached packed u128 of timestamp indices (bits 127..80). Updated on
     // timestamp change — either incrementally (small deltas) or via full
-    // re-encode (large deltas or first call).
+    // re-encode (deltas above 58, including a first call at a timestamp above 58).
     cached_timestamp_packed: u128,
     // Cached packed u128 of indices 0-12 (bits 127..50). Equals
     // cached_timestamp_packed | packed counter head. Recomputed when
@@ -697,6 +701,7 @@ impl IdGenerator {
     pub fn new() -> Self {
         IdGenerator {
             timestamp_cache_ms: 0,
+            counter_seeded: false,
             counter_head: [FIRST_INDEX; COUNTER_HEAD_CHAR_COUNT],
             counter_tail: FIRST_INDEX,
             cached_timestamp_packed: 0,
@@ -774,14 +779,14 @@ impl IdGenerator {
     /// position for the 7 random tail indices.
     #[inline(always)]
     fn prepare_next(&mut self, timestamp: u64) -> usize {
-        if timestamp > self.timestamp_cache_ms {
+        if timestamp > self.timestamp_cache_ms || !self.counter_seeded {
             let delta = timestamp - self.timestamp_cache_ms;
             if delta <= BASE {
                 // Fast path: increment the packed timestamp directly,
                 // avoiding 8 divisions by 58.
                 self.increment_encoded_timestamp(delta);
             } else {
-                // Large jump or first call: full re-encode.
+                // Large jump (including a first call above 58): full re-encode.
                 self.encode_timestamp(timestamp);
             }
             // Commit only after the encoders have range-checked: if they
@@ -835,7 +840,8 @@ impl IdGenerator {
         self.cached_timestamp_packed = pack_timestamp(&indices);
     }
 
-    /// Increment the packed timestamp representation by `delta` (1..=58).
+    /// Increment the packed timestamp representation by `delta` (0..=58; 0 only on a
+    /// first call at timestamp 0, which leaves it unchanged).
     ///
     /// Performs base-58 addition with carry directly on the 6-bit fields
     /// packed in `cached_timestamp_packed`, avoiding the 8 div/mod operations
@@ -926,6 +932,7 @@ impl IdGenerator {
             .copy_from_slice(&self.random_buffer[position..position + COUNTER_HEAD_CHAR_COUNT]);
         self.counter_tail = self.random_buffer[position + COUNTER_HEAD_CHAR_COUNT];
         self.cached_prefix = self.cached_timestamp_packed | pack_counter_head(&self.counter_head);
+        self.counter_seeded = true;
     }
 
     /// Handle carry propagation through the counter head indices.

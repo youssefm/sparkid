@@ -328,6 +328,32 @@ fn test_encode_timestamp_zero() {
 }
 
 #[test]
+fn test_counter_seeded_on_first_call_at_timestamp_zero() {
+    // A fresh generator's first call at timestamp 0 must still seed the
+    // counter randomly. Two independent seeds collide with probability
+    // 58^-6, so identical counters almost certainly mean no seeding.
+    let first = IdGenerator::new().next_id_at(0);
+    let second = IdGenerator::new().next_id_at(0);
+    assert_eq!(first.timestamp_ms(), 0);
+    assert_ne!(first.as_str()[8..14], second.as_str()[8..14]);
+}
+
+#[test]
+fn test_monotonic_at_timestamp_zero_from_fresh_generator() {
+    // Only the first call at timestamp 0 may seed the counter. If seeding
+    // weren't recorded, every call would reseed and the counter would jump
+    // backward about half the time.
+    const ID_COUNT: usize = 1_000;
+    let mut gen = IdGenerator::new();
+    let mut previous = gen.next_id_at(0);
+    for _ in 1..ID_COUNT {
+        let id = gen.next_id_at(0);
+        assert!(id > previous, "{id} not greater than {previous}");
+        previous = id;
+    }
+}
+
+#[test]
 fn test_encode_timestamp_max() {
     let mut gen = IdGenerator::new();
     let id = gen.next_id_at(MAX_TIMESTAMP);
