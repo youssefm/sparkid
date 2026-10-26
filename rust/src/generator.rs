@@ -407,12 +407,14 @@ impl SparkIdStr {
 impl Deref for SparkIdStr {
     type Target = str;
 
+    #[inline]
     fn deref(&self) -> &str {
         self.as_str_inner()
     }
 }
 
 impl AsRef<str> for SparkIdStr {
+    #[inline]
     fn as_ref(&self) -> &str {
         self.as_str_inner()
     }
@@ -447,6 +449,7 @@ impl fmt::Debug for SparkId {
 }
 
 impl From<SparkId> for String {
+    #[inline]
     fn from(id: SparkId) -> String {
         let s = id.as_str();
         String::from(&*s)
@@ -510,6 +513,7 @@ impl FromStr for SparkId {
 impl<'a> TryFrom<&'a str> for SparkId {
     type Error = ParseSparkIdError;
 
+    #[inline]
     fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         s.parse()
     }
@@ -554,6 +558,7 @@ impl FromStr for SparkIdStr {
 impl<'a> TryFrom<&'a str> for SparkIdStr {
     type Error = ParseSparkIdError;
 
+    #[inline]
     fn try_from(s: &'a str) -> Result<Self, Self::Error> {
         s.parse()
     }
