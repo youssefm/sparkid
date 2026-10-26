@@ -42,14 +42,15 @@ let owned: String = id.into(); // Into<String> when needed
 
 ## How it works
 
-Each ID is composed of two parts:
+Each ID is composed of three parts:
 
 ```
-[8-char timestamp][13-char suffix]
+[8-char timestamp][6-char counter][7-char random]
 ```
 
 - **Timestamp** (8 chars): Current time in milliseconds, Base58-encoded. IDs generated in a later millisecond always sort after earlier ones.
-- **Suffix** (13 chars): Seeded from a cryptographically secure PRNG (rejection-sampled, no modulo bias) at the start of each millisecond, then monotonically incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Counter** (6 chars): Randomly seeded at the start of each millisecond, then incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Random** (7 chars): Freshly generated for every ID from `rand`'s `StdRng` (currently ChaCha12, seeded from OS entropy), and rejection-sampled to avoid modulo bias. Within a millisecond, the counter alone would make each ID predictable from the previous one; the random tail prevents that.
 
 ## `SparkId` type
 
@@ -121,9 +122,12 @@ Enable the `serde` feature for `Serialize` and `Deserialize` on both `SparkId` a
 
 ```bash
 cargo add sparkid --features serde
+cargo add serde --features derive   # for the derive example below
 ```
 
-Human-readable formats (JSON, TOML, etc.) serialize as the 21-char Base58 string. Binary formats (postcard, bincode, etc.) serialize as the 16-byte packed representation.
+`SparkId` adapts to the format: human-readable formats (JSON, TOML, etc.) serialize it as the 21-char Base58 string, and binary formats (postcard, bincode, etc.) serialize it as the 16-byte packed representation.
+
+`SparkIdStr` always serializes as the 21-char Base58 string, in every format. If you want the compact binary encoding, store a `SparkId` rather than a `SparkIdStr`.
 
 ```rust
 use sparkid::SparkId;
@@ -144,14 +148,17 @@ Across threads, IDs are **unique but not ordered** relative to each other. Each 
 If you need process-wide monotonic ordering across threads, wrap a single `IdGenerator` in a `Mutex`:
 
 ```rust
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Mutex, OnceLock};
 use sparkid::IdGenerator;
 
-static GEN: LazyLock<Mutex<IdGenerator>> =
-    LazyLock::new(|| Mutex::new(IdGenerator::new()));
+static GENERATOR: OnceLock<Mutex<IdGenerator>> = OnceLock::new();
 
 fn generate_id_monotonic() -> sparkid::SparkId {
-    GEN.lock().unwrap().next_id()
+    GENERATOR
+        .get_or_init(|| Mutex::new(IdGenerator::new()))
+        .lock()
+        .unwrap()
+        .next_id()
 }
 ```
 
@@ -162,15 +169,15 @@ For manual control, use the `IdGenerator` struct directly:
 ```rust
 use sparkid::IdGenerator;
 
-let mut gen = IdGenerator::new();
-let id = gen.next_id();
+let mut generator = IdGenerator::new();
+let id = generator.next_id();
 ```
 
 `IdGenerator` also implements `Iterator<Item = SparkId>`:
 
 ```rust
-let mut gen = sparkid::IdGenerator::new();
-let ids: Vec<sparkid::SparkId> = gen.take(100).collect();
+let generator = sparkid::IdGenerator::new();
+let ids: Vec<sparkid::SparkId> = generator.take(100).collect();
 ```
 
 ## License

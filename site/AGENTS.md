@@ -59,7 +59,7 @@ The entire page lives in `src/pages/index.astro`:
 3. **Anatomy** — Visual breakdown of a SparkID's 3 segments (timestamp, counter, random) with properties
 4. **Comparison table** — sparkid vs UUID v4, UUID v7, nanoid, ULID
 5. **Code examples** — Tabbed JS/Python/Rust snippets
-6. **Features grid** — Key properties (monotonic, collision-resistant, human readable, thread-safe, zero deps, multi-language)
+6. **Features grid** — Key properties (monotonic, collision-resistant, human readable, thread-safe, minimal deps, multi-language)
 7. **Benchmarks** — Bar charts per language showing sparkid vs alternatives
 8. **CTA** — Final call to action with install command
 9. **Footer** — GitHub, npm, PyPI, crates.io links + author credit

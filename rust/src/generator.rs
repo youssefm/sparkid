@@ -659,8 +659,8 @@ mod serde_support {
 /// # Examples
 ///
 /// ```
-/// let mut gen = sparkid::IdGenerator::new();
-/// let id = gen.next_id();
+/// let mut generator = sparkid::IdGenerator::new();
+/// let id = generator.next_id();
 /// let s = id.as_str();
 /// assert_eq!(s.len(), 21);
 /// assert!(s.chars().all(|c| c.is_ascii_alphanumeric()));
@@ -727,8 +727,8 @@ impl IdGenerator {
     /// # Examples
     ///
     /// ```
-    /// let mut gen = sparkid::IdGenerator::new();
-    /// let id = gen.next_id();
+    /// let mut generator = sparkid::IdGenerator::new();
+    /// let id = generator.next_id();
     /// let s = id.as_str();
     /// assert_eq!(s.len(), 21);
     /// println!("{id}"); // no allocation
@@ -758,8 +758,8 @@ impl IdGenerator {
     /// # Examples
     ///
     /// ```
-    /// let mut gen = sparkid::IdGenerator::new();
-    /// let id = gen.next_id_at(1_700_000_000_000);
+    /// let mut generator = sparkid::IdGenerator::new();
+    /// let id = generator.next_id_at(1_700_000_000_000);
     /// let s = id.as_str();
     /// assert_eq!(s.len(), 21);
     /// ```

@@ -39,7 +39,7 @@ print(ms)
 Pack IDs into 16 bytes for compact storage. Sort order is preserved — byte-wise comparison on the binary form gives the same ordering as string comparison.
 
 ```python
-from sparkid import to_bytes, from_bytes
+from sparkid import generate_id, to_bytes, from_bytes
 
 id = generate_id()
 
@@ -58,25 +58,26 @@ assert id == restored
 | **Monotonic** | Strictly increasing within each thread |
 | **URL-safe** | Yes |
 | **Collision resistance** | ~58^13 (~8.4 x 10^22) combinations per millisecond |
-| **Randomness** | Cryptographically secure (`os.urandom`) |
-| **Thread-safe** | Yes (via `threading.local`) |
+| **Randomness** | Cryptographically secure (CSPRNG seeded from OS entropy) |
+| **Thread-safe** | Yes (one generator per OS thread) |
 
 ## How it works
 
-Each ID is composed of two parts:
+Each ID is composed of three parts:
 
 ```
-[8-char timestamp][13-char suffix]
+[8-char timestamp][6-char counter][7-char random]
 ```
 
 - **Timestamp** (8 chars): Current time in milliseconds, Base58-encoded. IDs generated in a later millisecond always sort after earlier ones.
-- **Suffix** (13 chars): Seeded from `os.urandom` (rejection-sampled, no modulo bias) at the start of each millisecond, then monotonically incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Counter** (6 chars): Randomly seeded at the start of each millisecond, then incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Random** (7 chars): Freshly generated for every ID from a CSPRNG seeded from OS entropy, and rejection-sampled to avoid modulo bias. Within a millisecond, the counter alone would make each ID predictable from the previous one; the random tail prevents that.
 
 ## Ordering guarantees
 
 IDs from a single `IdGenerator` instance (or a single thread using `generate_id()`) are **strictly monotonically increasing** — every ID is lexicographically greater than the one before it.
 
-Across threads, IDs are **unique but not ordered** relative to each other. Each thread gets its own generator via `threading.local`, so there is no cross-thread coordination. This is the same guarantee provided by most UUID v7 libraries.
+Across threads, IDs are **unique but not ordered** relative to each other. Each OS thread gets its own generator, so there is no cross-thread coordination. This is the same guarantee provided by most UUID v7 libraries.
 
 If you need process-wide monotonic ordering across threads, wrap a single `IdGenerator` in a lock:
 
@@ -85,11 +86,11 @@ import threading
 from sparkid import IdGenerator
 
 _lock = threading.Lock()
-_gen = IdGenerator()
+_generator = IdGenerator()
 
 def generate_id_monotonic():
     with _lock:
-        return _gen()
+        return _generator()
 ```
 
 ## Advanced usage
@@ -99,11 +100,11 @@ For manual control, use the `IdGenerator` class directly:
 ```python
 from sparkid import IdGenerator
 
-gen = IdGenerator()
-id = gen()
+generator = IdGenerator()
+id = generator()
 ```
 
-Each `IdGenerator` instance maintains its own internal state. The module-level `generate_id()` function uses `threading.local` to automatically create one instance per thread.
+Each `IdGenerator` instance maintains its own internal state. The module-level `generate_id()` function automatically uses one internal generator per OS thread.
 
 ## License
 

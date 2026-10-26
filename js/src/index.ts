@@ -338,6 +338,8 @@ export function generateId(): string {
  *
  * @example
  * ```ts
+ * import { generateIdAt, extractTimestamp } from "sparkid";
+ *
  * const id = generateIdAt(new Date("2024-01-01T00:00:00Z"));
  * const ts = extractTimestamp(id);
  * console.log(ts.toISOString()); // 2024-01-01T00:00:00.000Z
@@ -370,6 +372,8 @@ export function generateIdAt(timestamp: Date): string {
  *
  * @example
  * ```ts
+ * import { generateId, extractTimestamp } from "sparkid";
+ *
  * const id = generateId();
  * const ts = extractTimestamp(id);
  * console.log(ts.toISOString());

@@ -23,11 +23,11 @@ class IdGenerator(_RustIdGenerator):
     Each ID is composed of three parts:
       - 8-char timestamp prefix  (milliseconds, Base58-encoded, sortable)
       - 6-char monotonic counter (randomly seeded each millisecond, incremented)
-      - 7-char random tail       (independently random per ID, from os.urandom)
+      - 7-char random tail       (independently random per ID, from a CSPRNG)
 
     IDs are strictly monotonically increasing within a single generator instance:
     across milliseconds by the timestamp prefix, and within the same millisecond
-    by incrementing the counter (seeded from os.urandom at the start of each new
+    by incrementing the counter (randomly seeded at the start of each new
     millisecond). On counter overflow the timestamp is bumped forward and the
     counter is reseeded. Because the counter is randomly seeded (not starting
     at zero), the probability of overflow when generating n IDs in one
@@ -42,13 +42,13 @@ class IdGenerator(_RustIdGenerator):
       - Monotonically increasing (within a single generator instance)
       - URL-safe, no ambiguous characters
       - ~58^13 (~8.4 x 10^22) total combinations per millisecond
-      - Cryptographically secure randomness (os.urandom)
+      - Cryptographically secure randomness (CSPRNG seeded from OS entropy)
 
     Thread safety: each IdGenerator instance is designed for use by a single
-    thread. The module-level generate_id() uses threading.local to automatically
-    create one instance per thread. IDs are strictly monotonic within each
-    instance; across threads they are unique but unordered. For process-wide
-    monotonic ordering, protect a single shared instance with a lock.
+    thread. The module-level generate_id() automatically uses one internal
+    generator per OS thread. IDs are strictly monotonic within each generator;
+    across threads they are unique but unordered. For process-wide monotonic
+    ordering, protect a single shared instance with a lock.
     """
 
     # _all_generators needs weakrefs. CPython needs the "__weakref__" slot for

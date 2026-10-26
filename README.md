@@ -6,7 +6,7 @@
 [![PyPI](https://img.shields.io/pypi/v/sparkid)](https://pypi.org/project/sparkid/)
 [![crates.io](https://img.shields.io/crates/v/sparkid)](https://crates.io/crates/sparkid)
 
-Fast, monotonic, time-sortable, 21-char Base58 unique ID generator. Zero dependencies.
+Fast, monotonic, time-sortable, 21-char Base58 unique ID generator. No dependencies in JS or Python; only `rand` in Rust.
 
 ```
 1ocmpHE1bFnygEBAPTzMK
@@ -81,7 +81,7 @@ from sparkid import generate_id
 id = generate_id()
 ```
 
-Thread-safe via `threading.local` (one generator per thread). Fork-safe via `os.register_at_fork`.
+Thread-safe (one generator per OS thread). Fork-safe via `os.register_at_fork`.
 
 IDs from a single thread are strictly monotonically increasing. Across threads, IDs are unique but unordered. For process-wide monotonic ordering, wrap an `IdGenerator` in a lock — see [python/README.md](python/README.md) for details.
 

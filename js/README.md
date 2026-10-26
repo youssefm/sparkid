@@ -26,12 +26,12 @@ const id = generateId();
 ### Extract timestamp
 
 ```typescript
-import { extractTimestamp } from "sparkid";
+import { generateId, extractTimestamp } from "sparkid";
 
 const id = generateId();
 const date = extractTimestamp(id);
 console.log(date.toISOString());
-// => "2025-11-14T22:13:20.000Z"
+// => "2024-11-14T22:13:20.000Z"
 ```
 
 ### Binary representation
@@ -39,6 +39,7 @@ console.log(date.toISOString());
 Pack IDs into 16 bytes for compact storage. Sort order is preserved — `memcmp` on the binary bytes gives the same ordering as string comparison.
 
 ```typescript
+import { generateId } from "sparkid";
 import { toBytes, fromBytes } from "sparkid/binary";
 
 const id = generateId();
@@ -62,14 +63,15 @@ console.log(id === restored); // true
 
 ## How it works
 
-Each ID is composed of two parts:
+Each ID is composed of three parts:
 
 ```
-[8-char timestamp][13-char suffix]
+[8-char timestamp][6-char counter][7-char random]
 ```
 
 - **Timestamp** (8 chars): Current time in milliseconds, Base58-encoded. IDs generated in a later millisecond always sort after earlier ones.
-- **Suffix** (13 chars): Seeded from `crypto.getRandomValues` (rejection-sampled, no modulo bias) at the start of each millisecond, then monotonically incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Counter** (6 chars): Randomly seeded at the start of each millisecond, then incremented for each subsequent ID within that millisecond. This guarantees strict ordering even when multiple IDs share a timestamp.
+- **Random** (7 chars): Freshly generated for every ID from `crypto.getRandomValues` and rejection-sampled to avoid modulo bias. Within a millisecond, the counter alone would make each ID predictable from the previous one; the random tail prevents that.
 
 ## Ordering guarantees
 

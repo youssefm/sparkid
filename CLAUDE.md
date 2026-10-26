@@ -51,9 +51,9 @@ rust/        # Rust crate (crates.io: sparkid)
 
 ## Tests
 
-**JS**: `npm test` (uses `node:test` + `node:assert` — zero test deps)
+**JS**: `npm test` (uses `node:test` + `node:assert` — no test-framework deps)
 **Python**: `uv run pytest tests/` (requires `uv sync --group test`)
-**Rust**: `cargo test` (uses built-in test framework — zero test deps)
+**Rust**: `cargo test` (uses built-in test framework — no test-framework deps)
 
 Tests cover: ID format, timestamp encoding, counter monotonicity, carry propagation, uniqueness, cross-ms sortability, clock regression, random tail uniformity/bias, rejection sampling, thread safety, fork safety, and public API.
 
@@ -72,7 +72,7 @@ Base58 alphabet: `123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz`
 1. **Monotonicity**: IDs from a single generator instance must be strictly increasing (lexicographic) within the same millisecond and across milliseconds
 2. **No modulo bias**: Random 6-bit candidates are rejection-sampled (take 6 bits, discard >=58) — never use modulo
 3. **Counter overflow**: When all 6 counter chars are maxed, bump timestamp forward 1ms and reseed — never wrap
-4. **Thread safety (Python)**: `generate_id()` uses `threading.local` for per-thread generators; `IdGenerator` instances are NOT thread-safe
+4. **Thread safety (Python)**: `generate_id()` uses a Rust `thread_local!` (`LOCAL_GEN` in `python/rust/lib.rs`) for per-OS-thread generators; `IdGenerator` instances are NOT thread-safe
 5. **Thread safety (Rust)**: `SparkId::new()` uses `thread_local!` for per-thread generators; `IdGenerator` instances require `&mut self` (enforced by borrow checker)
 6. **Fork safety (Python)**: `os.register_at_fork` resets all live generators in child processes
 7. **Zero runtime dependencies**: JS and Python must remain dependency-free; Rust uses only `rand` (userspace CSPRNG)

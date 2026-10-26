@@ -23,8 +23,8 @@
 //! let owned: String = id.into();   // Into<String> when needed
 //!
 //! // Advanced usage — own generator instance
-//! let mut gen = sparkid::IdGenerator::new();
-//! let id = gen.next_id();
+//! let mut generator = sparkid::IdGenerator::new();
+//! let id = generator.next_id();
 //! let s = id.as_str();
 //! assert_eq!(s.len(), 21);
 //! ```
