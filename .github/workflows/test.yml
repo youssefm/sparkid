@@ -36,7 +36,7 @@ jobs:
         # free-threaded (t) and PyPy builds. Linux x86_64 only; macOS and
         # Windows are covered by python-platform. Other Linux architectures and
         # musl are not tested.
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.13t", "3.14t", "pypy3.11"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.13t", "3.14t", "pypy3.11"]
     env:
       # Without this, uv may pick another interpreter on PATH (e.g. the GIL
       # build instead of 3.14t) and silently test the wrong one.

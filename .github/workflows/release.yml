@@ -291,7 +291,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -i 3.9 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11
+          args: --release --out dist -i 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11
           manylinux: auto
           working-directory: python
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -325,7 +325,7 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist -i 3.9 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t
+          args: --release --out dist -i 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t
           manylinux: musllinux_1_2
           working-directory: python
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -355,13 +355,13 @@ jobs:
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64
-          args: --release --out dist -i 3.9 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11
+          args: --release --out dist -i 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11
           working-directory: python
       - name: Build wheels — universal2
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: universal2-apple-darwin
-          args: --release --out dist -i 3.9 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11
+          args: --release --out dist -i 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11
           working-directory: python
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -380,10 +380,10 @@ jobs:
         include:
           - os: windows-latest
             target: x64
-            interpreter: "3.9 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11"
+            interpreter: "3.10 3.11 3.12 3.13 3.13t 3.14 3.14t pypy3.11"
           - os: windows-latest
             target: x86
-            interpreter: "3.9 3.10 3.11 3.12 3.13 3.13t 3.14 3.14t"
+            interpreter: "3.10 3.11 3.12 3.13 3.13t 3.14 3.14t"
           - os: windows-11-arm
             target: aarch64
             interpreter: "3.11 3.12 3.13 3.14 3.14t"
